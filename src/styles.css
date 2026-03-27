@@ -1,0 +1,470 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap');
+
+:root {
+  font-family: 'Sora', sans-serif;
+  color: #16324f;
+  background:
+    radial-gradient(circle at top left, rgba(201, 115, 66, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(76, 140, 119, 0.16), transparent 20%),
+    linear-gradient(180deg, #f4f1ea 0%, #edf0f4 100%);
+  --ink: #16324f;
+  --muted: #5a6880;
+  --panel: rgba(255, 252, 247, 0.82);
+  --line: rgba(22, 50, 79, 0.1);
+  --warm: #c97342;
+  --cool: #4c8c77;
+  --shadow: 0 24px 60px rgba(22, 50, 79, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--ink);
+  background: transparent;
+}
+
+button {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 24px;
+  min-height: 100vh;
+  padding: 24px;
+  transition: grid-template-columns 220ms ease;
+  position: relative;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 24px minmax(0, 1fr);
+}
+
+.sidebar-toggle,
+.sidebar-overlay {
+  display: none;
+}
+
+.sidebar,
+.hero-card,
+.metric-card,
+.chart-card {
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 28px;
+  border-radius: 28px;
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 48px);
+  z-index: 20;
+  overflow: visible;
+  transition: opacity 180ms ease, transform 220ms ease;
+}
+
+.sidebar-desktop-toggle {
+  position: absolute;
+  top: 60px;
+  left: clamp(248px, 22vw, 304px);
+  width: 32px;
+  height: 64px;
+  border: 1px solid rgba(22, 50, 79, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.96);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  cursor: pointer;
+  z-index: 25;
+  transition: left 220ms ease, transform 160ms ease;
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-24px);
+}
+
+.sidebar-desktop-toggle:hover {
+  transform: translateX(2px);
+}
+
+.app-shell.sidebar-collapsed .sidebar-desktop-toggle {
+  left: 24px;
+}
+
+.sidebar-kicker,
+.hero-kicker,
+.chart-eyebrow,
+.metric-label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.sidebar h1,
+.hero-card h2,
+.chart-card h3,
+.metric-card h3 {
+  margin: 10px 0 0;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+.sidebar h1 {
+  font-size: clamp(2rem, 3vw, 2.75rem);
+  line-height: 0.96;
+}
+
+.sidebar nav {
+  display: grid;
+  gap: 12px;
+}
+
+.nav-item,
+.segmented-control button {
+  border: 1px solid rgba(22, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 10px 14px;
+  transition: 160ms ease;
+}
+
+.nav-item {
+  text-align: left;
+  padding: 14px 16px;
+}
+
+.nav-item.active,
+.segmented-control button.active {
+  background: var(--ink);
+  color: #f8f6f1;
+  border-color: transparent;
+}
+
+.nav-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sidebar-note,
+.hero-copy,
+.metric-detail,
+.chart-value {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.dashboard-content {
+  display: grid;
+  gap: 20px;
+}
+
+.hero-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 26px 28px;
+  border-radius: 28px;
+}
+
+.hero-card h2 {
+  font-size: clamp(2rem, 3vw, 3.5rem);
+  max-width: 12ch;
+}
+
+.hero-copy {
+  max-width: 56ch;
+  margin: 14px 0 0;
+}
+
+.hero-tag {
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(22, 50, 79, 0.96), rgba(76, 140, 119, 0.94));
+  color: #f4f1ea;
+}
+
+.metrics-grid,
+.charts-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.charts-grid-primary {
+  grid-template-columns: 1.4fr 1fr;
+}
+
+.charts-grid-secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.charts-grid-tertiary {
+  grid-template-columns: 1fr;
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 22px 24px;
+  border-radius: 24px;
+}
+
+.metric-card h3 {
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  margin-top: 16px;
+}
+
+.metric-accent {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 4px;
+}
+
+.chart-card {
+  padding: 22px;
+  border-radius: 28px;
+}
+
+.chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.chart-card h3 {
+  font-size: 1.4rem;
+}
+
+.chart-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.chart-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.chart-expand-button,
+.chart-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(22, 50, 79, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.chart-expand-button svg,
+.chart-modal-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chart-expand-button:hover,
+.chart-modal-close:hover {
+  transform: translateY(-1px);
+  border-color: rgba(22, 50, 79, 0.16);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.chart-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(22, 50, 79, 0.36);
+  backdrop-filter: blur(8px);
+  z-index: 60;
+}
+
+.chart-modal {
+  width: min(1200px, calc(100vw - 56px));
+  max-height: min(86vh, 920px);
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 252, 247, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: 0 36px 80px rgba(22, 50, 79, 0.18);
+}
+
+.chart-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.chart-modal h3 {
+  margin: 10px 0 0;
+  font-size: clamp(1.5rem, 2vw, 2rem);
+}
+
+.segmented-control {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.segmented-control button {
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.segmented-control button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(22, 50, 79, 0.16);
+}
+
+@media (max-width: 1200px) {
+  .app-shell,
+  .app-shell.sidebar-collapsed,
+  .metrics-grid,
+  .charts-grid-primary,
+  .charts-grid-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-desktop-toggle {
+    display: none;
+  }
+
+  .sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    border: 1px solid rgba(22, 50, 79, 0.08);
+    background: rgba(255, 252, 247, 0.88);
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 12px 16px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+    position: sticky;
+    top: 24px;
+    z-index: 30;
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    border: 0;
+    background: rgba(22, 50, 79, 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+    z-index: 19;
+  }
+
+  .sidebar-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 14px;
+    top: 14px;
+    bottom: 14px;
+    width: min(320px, calc(100vw - 28px));
+    height: auto;
+    transform: translateX(calc(-100% - 24px));
+    transition: transform 220ms ease;
+    overflow-y: auto;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding: 14px;
+    gap: 14px;
+  }
+
+  .sidebar,
+  .hero-card,
+  .metric-card,
+  .chart-card {
+    border-radius: 22px;
+  }
+
+  .hero-card,
+  .chart-header {
+    flex-direction: column;
+  }
+
+  .chart-actions,
+  .segmented-control {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .chart-toolbar {
+    justify-content: flex-start;
+  }
+
+  .hero-tag {
+    white-space: normal;
+  }
+
+  .chart-modal-overlay {
+    padding: 14px;
+  }
+
+  .chart-modal {
+    width: calc(100vw - 28px);
+    padding: 18px;
+  }
+
+  .chart-modal-header {
+    flex-direction: column;
+  }
+}
