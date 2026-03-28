@@ -188,7 +188,133 @@ export function getHeatmapSeries(records, granularity) {
   };
 }
 
-export function getVarianceSeries(records, granularity, filter) {
+export function getDurationHistogram(records) {
+  const bins = [
+    { label: '15-30 min', min: 15, max: 30, byYou: 0, byOtherStaff: 0 },
+    { label: '30-60 min', min: 30, max: 60, byYou: 0, byOtherStaff: 0 },
+    { label: '1-2 hours', min: 60, max: 120, byYou: 0, byOtherStaff: 0 },
+    { label: '2+ hours', min: 120, max: Number.POSITIVE_INFINITY, byYou: 0, byOtherStaff: 0 },
+  ];
+
+  records.forEach((record) => {
+    const matchingBin = bins.find((bin) => record.actualDurationMinutes >= bin.min && record.actualDurationMinutes < bin.max);
+
+    if (!matchingBin) {
+      return;
+    }
+
+    if (record.ownerCategory === 'by-you') {
+      matchingBin.byYou += 1;
+    } else {
+      matchingBin.byOtherStaff += 1;
+    }
+  });
+
+  return bins.map(({ label, byYou, byOtherStaff }) => ({
+    label,
+    byYou,
+    byOtherStaff,
+  }));
+}
+
+function sanitizeCompany(value) {
+  return value && value.trim() ? value : 'Unknown';
+}
+
+export function getPage2PersonStats(records) {
+  const people = new Map();
+
+  records.forEach((record) => {
+    const personName = record.counterpartName || record.ownerName || 'Unknown';
+    const company = sanitizeCompany(record.counterpartCompany);
+
+    if (!people.has(personName)) {
+      people.set(personName, {
+        person: personName,
+        company,
+        companyType: record.counterpartType || 'staff',
+        meetings: 0,
+        totalMinutes: 0,
+        hostMinutes: 0,
+        attendeeMinutes: 0,
+        talkativeTotal: 0,
+        inquisitiveTotal: 0,
+      });
+    }
+
+    const current = people.get(personName);
+    current.meetings += 1;
+    current.totalMinutes += record.actualDurationMinutes;
+    current.talkativeTotal += record.counterpartTalkativeScore ?? 50;
+    current.inquisitiveTotal += record.counterpartInquisitiveScore ?? 50;
+
+    if (record.jacquesRole === 'host') {
+      current.hostMinutes += record.actualDurationMinutes;
+    } else {
+      current.attendeeMinutes += record.actualDurationMinutes;
+    }
+  });
+
+  return Array.from(people.values())
+    .map((entry) => ({
+      ...entry,
+      averageDurationMinutes: entry.meetings ? entry.totalMinutes / entry.meetings : 0,
+      talkativeScore: entry.meetings ? entry.talkativeTotal / entry.meetings : 0,
+      inquisitiveScore: entry.meetings ? entry.inquisitiveTotal / entry.meetings : 0,
+    }))
+    .sort((left, right) => right.totalMinutes - left.totalMinutes);
+}
+
+export function getCompanyOptions(personStats) {
+  const options = Array.from(new Set(personStats.map((entry) => sanitizeCompany(entry.company))));
+  return ['All companies', ...options.sort((left, right) => left.localeCompare(right))];
+}
+
+export function filterPersonStatsByCompany(personStats, companyFilter) {
+  if (!companyFilter || companyFilter === 'All companies') {
+    return personStats;
+  }
+
+  return personStats.filter((entry) => sanitizeCompany(entry.company) === companyFilter);
+}
+
+export function getDotPlotData(records, companyFilter) {
+  const filtered = records.filter((record) => {
+    if (!companyFilter || companyFilter === 'All companies') {
+      return true;
+    }
+
+    return sanitizeCompany(record.counterpartCompany) === companyFilter;
+  });
+
+  const meetingCounts = new Map();
+  filtered.forEach((record) => {
+    const person = record.counterpartName || record.ownerName || 'Unknown';
+    meetingCounts.set(person, (meetingCounts.get(person) ?? 0) + 1);
+  });
+
+  const people = Array.from(meetingCounts.entries())
+    .sort((left, right) => right[1] - left[1])
+    .map(([name]) => name);
+
+  const yIndex = new Map(people.map((name, index) => [name, index]));
+
+  const points = filtered.map((record) => {
+    const person = record.counterpartName || record.ownerName || 'Unknown';
+    return {
+      value: [record.startTime, yIndex.get(person)],
+      person,
+      duration: record.actualDurationMinutes,
+    };
+  });
+
+  return {
+    people,
+    points,
+  };
+}
+
+export function getExternalVsStaffTrend(records, granularity = 'weeks') {
   const buckets = new Map();
 
   records.forEach((record) => {
@@ -213,15 +339,12 @@ export function getVarianceSeries(records, granularity, filter) {
       label = `${MONTH_LABELS[date.getMonth()]} ${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:00`;
     }
 
-    const current = buckets.get(key) ?? { label, overtime: 0, undertime: 0 };
-    const delta = record.actualDurationMinutes - record.scheduledDurationMinutes;
+    const current = buckets.get(key) ?? { label, externalMinutes: 0, staffMinutes: 0 };
 
-    if (delta > 0 && filter !== 'undertime') {
-      current.overtime += delta;
-    }
-
-    if (delta < 0 && filter !== 'overtime') {
-      current.undertime += Math.abs(delta);
+    if (record.counterpartType === 'external') {
+      current.externalMinutes += record.actualDurationMinutes;
+    } else {
+      current.staffMinutes += record.actualDurationMinutes;
     }
 
     buckets.set(key, current);
@@ -229,9 +352,33 @@ export function getVarianceSeries(records, granularity, filter) {
 
   return Array.from(buckets.entries())
     .sort(([left], [right]) => new Date(left) - new Date(right))
-    .map(([, entry]) => ({
-      label: entry.label,
-      overtime: entry.overtime,
-      undertime: entry.undertime,
+    .map(([, value]) => value);
+}
+
+export function getTopPeopleByScore(personStats, scoreKey, overallAverageDuration, limit = 5) {
+  return [...personStats]
+    .sort((left, right) => (right[scoreKey] ?? 0) - (left[scoreKey] ?? 0))
+    .slice(0, limit)
+    .map((entry, index) => ({
+      rank: index + 1,
+      person: entry.person,
+      score: entry[scoreKey] ?? 0,
+      averageDurationMinutes: entry.averageDurationMinutes,
+      overallAverageDurationMinutes: overallAverageDuration,
     }));
+}
+
+export function getMeetingMixData(records) {
+  const buckets = new Map();
+
+  records.forEach((record) => {
+    const sizeType = record.meetingSizeType || '1:M';
+    const audienceType = record.meetingAudienceType || 'mixed';
+    const label = `${sizeType} ${audienceType}`;
+    buckets.set(label, (buckets.get(label) ?? 0) + 1);
+  });
+
+  return Array.from(buckets.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((left, right) => right.value - left.value);
 }

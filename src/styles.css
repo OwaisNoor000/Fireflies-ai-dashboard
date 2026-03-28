@@ -217,6 +217,10 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.metrics-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .charts-grid-primary {
   grid-template-columns: 1.4fr 1fr;
 }
@@ -269,6 +273,15 @@ button {
   display: grid;
   gap: 10px;
   justify-items: end;
+}
+
+.company-select {
+  border: 1px solid rgba(22, 50, 79, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 170px;
 }
 
 .chart-toolbar {
@@ -338,6 +351,38 @@ button {
 .chart-modal h3 {
   margin: 10px 0 0;
   font-size: clamp(1.5rem, 2vw, 2rem);
+}
+
+.table-card {
+  overflow: hidden;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.score-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.score-table th,
+.score-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(22, 50, 79, 0.08);
+}
+
+.score-table thead th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.score-table tbody tr:hover {
+  background: rgba(22, 50, 79, 0.03);
 }
 
 .segmented-control {

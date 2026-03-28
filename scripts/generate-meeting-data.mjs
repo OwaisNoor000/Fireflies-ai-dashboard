@@ -42,6 +42,22 @@ const participantsByDepartment = {
   'Customer Success': ['Owen', 'Skye', 'Aiden', 'Cora', 'Ben'],
 };
 
+const executiveOwner = 'Jacques';
+const internalCompany = 'Denteel';
+
+const externalStakeholders = [
+  { name: 'Anika Shah', company: 'Helios Retail' },
+  { name: 'Mark Dalton', company: 'Northwind Capital' },
+  { name: 'Priya Menon', company: 'Vertex Logistics' },
+  { name: 'Jacob Reed', company: 'Summit Health' },
+  { name: 'Lea Novak', company: 'Orion Ventures' },
+  { name: 'Tom Alvarez', company: 'Cascade Group' },
+  { name: 'Rina Bose', company: 'Brightfield Systems' },
+  { name: 'Omar Siddiq', company: 'BlueAnchor Partners' },
+];
+
+const allInternalStaff = Array.from(new Set(Object.values(participantsByDepartment).flat()));
+
 const startDate = new Date();
 startDate.setMinutes(0, 0, 0);
 startDate.setHours(startDate.getHours() - (24 * 180));
@@ -52,6 +68,18 @@ function pick(array, indexSeed) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function getMeetingAudienceType(staffCount, externalCount) {
+  if (staffCount > 0 && externalCount > 0) {
+    return 'mixed';
+  }
+
+  if (externalCount > 0) {
+    return 'external';
+  }
+
+  return 'staff';
 }
 
 const records = [];
@@ -88,19 +116,65 @@ for (let hourOffset = 0; hourOffset < 24 * 180; hourOffset += 1) {
     date.setMinutes(startMinute, 0, 0);
 
     const participantsPool = participantsByDepartment[department];
-    const participants = Array.from({ length: 2 + ((meetingIndex + hourOffset) % 4) }, (_, index) => {
+    const ownerCategory = ((hourOffset + meetingIndex + day) % 5 === 0 || department === 'Operations') ? 'by-you' : 'by-other-staff';
+    const ownerName = ownerCategory === 'by-you'
+      ? executiveOwner
+      : participantsPool[(hourOffset + meetingIndex * 2) % participantsPool.length];
+
+    const audienceModeSeed = (hourOffset + meetingIndex + day + monthFactor) % 10;
+    const audienceMode = audienceModeSeed < 6 ? 'staff' : audienceModeSeed < 8 ? 'external' : 'mixed';
+
+    const attendeeCount = 1 + ((meetingIndex + hourOffset) % 4);
+    const staffAttendeeTarget = audienceMode === 'staff' ? attendeeCount : audienceMode === 'external' ? 0 : clamp(attendeeCount - 1, 1, attendeeCount);
+    const externalAttendeeTarget = attendeeCount - staffAttendeeTarget;
+
+    const staffAttendees = Array.from({ length: staffAttendeeTarget }, (_, index) => {
       return participantsPool[(index + hourOffset + meetingIndex) % participantsPool.length];
     });
+
+    const externalAttendees = Array.from({ length: externalAttendeeTarget }, (_, index) => {
+      return externalStakeholders[(hourOffset + meetingIndex + index * 3) % externalStakeholders.length];
+    });
+
+    const participantDetails = [
+      { name: executiveOwner, type: 'staff', company: internalCompany, isExecutive: true },
+      ...staffAttendees.map((name) => ({ name, type: 'staff', company: internalCompany, isExecutive: false })),
+      ...externalAttendees.map((entry) => ({ name: entry.name, type: 'external', company: entry.company, isExecutive: false })),
+    ];
+
+    const participants = participantDetails.map((entry) => entry.name);
+
+    const potentialCounterparts = participantDetails.filter((entry) => entry.name !== executiveOwner);
+    const counterpart = potentialCounterparts[(hourOffset + meetingIndex) % potentialCounterparts.length]
+      ?? { name: allInternalStaff[(hourOffset + meetingIndex) % allInternalStaff.length], type: 'staff', company: internalCompany };
+
+    const jacquesRole = ((hourOffset + meetingIndex + day) % 4 === 0) ? 'attendee' : 'host';
+    const counterpartTalkativeScore = clamp(35 + ((hourOffset * 7 + meetingIndex * 11) % 64), 0, 100);
+    const counterpartInquisitiveScore = clamp(28 + ((hourOffset * 5 + meetingIndex * 13 + day * 3) % 72), 0, 100);
+
+    const meetingSizeType = participantDetails.length === 2 ? '1:1' : '1:M';
+    const meetingAudienceType = getMeetingAudienceType(staffAttendees.length, externalAttendees.length);
 
     records.push({
       id: `MTG-${String(meetingId).padStart(5, '0')}`,
       title: `${pick(titlePrefixes, meetingId)} ${campaign}`,
       department,
       campaign,
+      ownerCategory,
+      ownerName,
+      jacquesRole,
+      counterpartName: counterpart.name,
+      counterpartType: counterpart.type,
+      counterpartCompany: counterpart.company,
+      counterpartTalkativeScore,
+      counterpartInquisitiveScore,
+      meetingSizeType,
+      meetingAudienceType,
       startTime: date.toISOString(),
       scheduledDurationMinutes,
       actualDurationMinutes,
       participants,
+      participantDetails,
       outcome: actualDurationMinutes > scheduledDurationMinutes ? 'overtime' : actualDurationMinutes < scheduledDurationMinutes ? 'undertime' : 'on-time',
     });
 
