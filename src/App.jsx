@@ -298,6 +298,46 @@ function CloseIcon() {
   );
 }
 
+function MeetingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 3v4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16 3v4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M4 9h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8 13h3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8 16h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PeopleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="9" cy="9" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M4.5 18c.4-2.4 2.5-4 4.5-4s4.1 1.6 4.5 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="16.5" cy="10" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M14.7 18c.3-1.7 1.7-2.9 3.4-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AlternativesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 14h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M12 4a6 6 0 0 0-3.4 10.9c.9.6 1.4 1.5 1.4 2.5V18h4v-.6c0-1 .5-1.9 1.4-2.5A6 6 0 0 0 12 4z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M10 21h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const NAV_ITEMS = [
+  { id: 'page1', label: 'Page 1 · Meetings', shortLabel: 'Meetings', Icon: MeetingsIcon },
+  { id: 'page2', label: 'Page 2 · People', shortLabel: 'People', Icon: PeopleIcon },
+  { id: 'page3', label: 'Page 3 · Alternatives', shortLabel: 'Alternatives', Icon: AlternativesIcon },
+];
+
 function MetricCard({ label, value, accent, detail }) {
   return (
     <article className="metric-card">
@@ -1349,14 +1389,40 @@ function App() {
           <h1>Jacques the COO</h1>
         </div>
         <nav>
-          <button type="button" className={`nav-item${activePage === 'page1' ? ' active' : ''}`} onClick={() => navigateTo('page1')}>Page 1 · Meetings</button>
-          <button type="button" className={`nav-item${activePage === 'page2' ? ' active' : ''}`} onClick={() => navigateTo('page2')}>Page 2 · People</button>
-          <button type="button" className={`nav-item${activePage === 'page3' ? ' active' : ''}`} onClick={() => navigateTo('page3')}>Page 3 · Do I really need a meetiing for this</button>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-item${activePage === item.id ? ' active' : ''}`}
+              onClick={() => navigateTo(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </nav>
         <p className="sidebar-note">
           Use the page switcher to move between time-based and relationship-based meeting analysis.
         </p>
       </aside>
+
+      <nav className="sidebar-icon-rail" aria-label="Dashboard page tabs">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.Icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`icon-nav-item${activePage === item.id ? ' active' : ''}`}
+              onClick={() => navigateTo(item.id)}
+              aria-label={item.shortLabel}
+              title={item.shortLabel}
+            >
+              <Icon />
+              <span className="sr-only">{item.shortLabel}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       <button
         type="button"
@@ -1589,7 +1655,7 @@ function App() {
             <header className="hero-card">
               <div>
                 <p className="hero-kicker">Page 3</p>
-                <h2>Do I really need a meetiing for this</h2>
+                <h2>Do I really need a meeting for this?</h2>
                 <p className="hero-copy">A quick read on meeting duration shape and how much of each session you appear to be carrying.</p>
               </div>
               <div className="hero-side">
