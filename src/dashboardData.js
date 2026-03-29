@@ -15,6 +15,7 @@ const GRANULARITY_LABELS = {
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FREE_EMAIL_DOMAINS = new Set(['gmail.com', 'outlook.com', 'hotmail.com', 'live.com']);
+const EXECUTIVE_NAME = 'Jacques';
 
 function startOfDay(date) {
   const result = new Date(date);
@@ -194,6 +195,23 @@ function getEmailDomain(value) {
   return trimmed.slice(atIndex + 1);
 }
 
+function getParticipants(record) {
+  if (!Array.isArray(record.participantDetails)) {
+    return [];
+  }
+
+  return record.participantDetails.filter((participant) => participant && participant.name);
+}
+
+function getParticipantsExcludingExecutive(record) {
+  return getParticipants(record).filter((participant) => participant.name !== EXECUTIVE_NAME);
+}
+
+function getParticipantScore(participant, scoreKey) {
+  const value = participant?.[scoreKey];
+  return Number.isFinite(value) ? value : 50;
+}
+
 function extractAttendeeEmailDomains(record) {
   const emails = [];
 
@@ -226,24 +244,39 @@ export function getCompanyTimeBreakdown(records, granularity = 'hours') {
   const buckets = new Map();
 
   records.forEach((record) => {
-    let companyNames = extractAttendeeEmailDomains(record)
-      .map((domain) => getCompanyNameFromDomain(domain))
-      .filter(Boolean);
+    const companyMinuteShares = new Map();
+    const participants = getParticipants(record);
 
-    if (!companyNames.length) {
-      companyNames = [sanitizeCompany(record.counterpartCompany)];
+    if (participants.length) {
+      const share = record.actualDurationMinutes / participants.length;
+      participants.forEach((participant) => {
+        const companyName = sanitizeCompany(participant.company);
+        companyMinuteShares.set(companyName, (companyMinuteShares.get(companyName) ?? 0) + share);
+      });
+    } else {
+      let companyNames = extractAttendeeEmailDomains(record)
+        .map((domain) => getCompanyNameFromDomain(domain))
+        .filter(Boolean);
+
+      if (!companyNames.length) {
+        companyNames = ['Unknown'];
+      }
+
+      const share = companyNames.length ? record.actualDurationMinutes / companyNames.length : record.actualDurationMinutes;
+      companyNames.forEach((companyName) => {
+        const normalizedCompany = sanitizeCompany(companyName);
+        companyMinuteShares.set(normalizedCompany, (companyMinuteShares.get(normalizedCompany) ?? 0) + share);
+      });
     }
 
-    const share = companyNames.length ? record.actualDurationMinutes / companyNames.length : record.actualDurationMinutes;
-
-    companyNames.forEach((companyName) => {
+    companyMinuteShares.forEach((minutes, companyName) => {
       const normalizedCompany = companyName && companyName.trim() ? companyName : 'Unknown';
       const current = buckets.get(normalizedCompany) ?? {
         totalMinutes: 0,
         meetingCount: 0,
       };
 
-      current.totalMinutes += share;
+      current.totalMinutes += minutes;
       current.meetingCount += 1;
       buckets.set(normalizedCompany, current);
     });
@@ -353,34 +386,44 @@ export function getPage2PersonStats(records) {
   const people = new Map();
 
   records.forEach((record) => {
-    const personName = record.counterpartName || record.ownerName || 'Unknown';
-    const company = sanitizeCompany(record.counterpartCompany);
+    const participants = getParticipants(record);
+    const nonExecutiveParticipants = participants.filter((participant) => participant.name !== EXECUTIVE_NAME);
+    const nonExecutiveShare = nonExecutiveParticipants.length
+      ? record.actualDurationMinutes / nonExecutiveParticipants.length
+      : 0;
 
-    if (!people.has(personName)) {
-      people.set(personName, {
-        person: personName,
-        company,
-        companyType: record.counterpartType || 'staff',
-        meetings: 0,
-        totalMinutes: 0,
-        hostMinutes: 0,
-        attendeeMinutes: 0,
-        talkativeTotal: 0,
-        inquisitiveTotal: 0,
-      });
-    }
+    participants.forEach((participant) => {
+      const personName = participant.name || 'Unknown';
 
-    const current = people.get(personName);
-    current.meetings += 1;
-    current.totalMinutes += record.actualDurationMinutes;
-    current.talkativeTotal += record.counterpartTalkativeScore ?? 50;
-    current.inquisitiveTotal += record.counterpartInquisitiveScore ?? 50;
+      if (!people.has(personName)) {
+        people.set(personName, {
+          person: personName,
+          company: sanitizeCompany(participant.company),
+          companyType: participant.type || 'staff',
+          meetings: 0,
+          totalMinutes: 0,
+          hostMinutes: 0,
+          attendeeMinutes: 0,
+          talkativeTotal: 0,
+          inquisitiveTotal: 0,
+        });
+      }
 
-    if (record.jacquesRole === 'host') {
-      current.hostMinutes += record.actualDurationMinutes;
-    } else {
-      current.attendeeMinutes += record.actualDurationMinutes;
-    }
+      const allocatedMinutes = participant.name === EXECUTIVE_NAME
+        ? record.actualDurationMinutes
+        : nonExecutiveShare;
+      const current = people.get(personName);
+      current.meetings += 1;
+      current.totalMinutes += allocatedMinutes;
+      current.talkativeTotal += getParticipantScore(participant, 'talkativeScore');
+      current.inquisitiveTotal += getParticipantScore(participant, 'inquisitiveScore');
+
+      if (record.ownerName === participant.name) {
+        current.hostMinutes += allocatedMinutes;
+      } else {
+        current.attendeeMinutes += allocatedMinutes;
+      }
+    });
   });
 
   return Array.from(people.values())
@@ -407,18 +450,28 @@ export function filterPersonStatsByCompany(personStats, companyFilter) {
 }
 
 export function getDotPlotData(records, companyFilter) {
-  const filtered = records.filter((record) => {
-    if (!companyFilter || companyFilter === 'All companies') {
-      return true;
-    }
+  const pointsByParticipant = [];
 
-    return sanitizeCompany(record.counterpartCompany) === companyFilter;
+  records.forEach((record) => {
+    const participants = getParticipants(record);
+    participants.forEach((participant) => {
+      const company = sanitizeCompany(participant.company);
+      if (companyFilter && companyFilter !== 'All companies' && company !== companyFilter) {
+        return;
+      }
+
+      pointsByParticipant.push({
+        person: participant.name || 'Unknown',
+        company,
+        startTime: record.startTime,
+        duration: record.actualDurationMinutes,
+      });
+    });
   });
 
   const meetingCounts = new Map();
-  filtered.forEach((record) => {
-    const person = record.counterpartName || record.ownerName || 'Unknown';
-    meetingCounts.set(person, (meetingCounts.get(person) ?? 0) + 1);
+  pointsByParticipant.forEach((point) => {
+    meetingCounts.set(point.person, (meetingCounts.get(point.person) ?? 0) + 1);
   });
 
   const people = Array.from(meetingCounts.entries())
@@ -427,12 +480,12 @@ export function getDotPlotData(records, companyFilter) {
 
   const yIndex = new Map(people.map((name, index) => [name, index]));
 
-  const points = filtered.map((record) => {
-    const person = record.counterpartName || record.ownerName || 'Unknown';
+  const points = pointsByParticipant.map((point) => {
     return {
-      value: [record.startTime, yIndex.get(person)],
-      person,
-      duration: record.actualDurationMinutes,
+      value: [point.startTime, yIndex.get(point.person)],
+      person: point.person,
+      duration: point.duration,
+      company: point.company,
     };
   });
 
@@ -469,10 +522,16 @@ export function getExternalVsStaffTrend(records, granularity = 'weeks') {
 
     const current = buckets.get(key) ?? { label, externalMinutes: 0, staffMinutes: 0 };
 
-    if (record.counterpartType === 'external') {
-      current.externalMinutes += record.actualDurationMinutes;
-    } else {
-      current.staffMinutes += record.actualDurationMinutes;
+    const participants = getParticipantsExcludingExecutive(record);
+    if (participants.length) {
+      const share = record.actualDurationMinutes / participants.length;
+      participants.forEach((participant) => {
+        if (participant.type === 'external') {
+          current.externalMinutes += share;
+        } else {
+          current.staffMinutes += share;
+        }
+      });
     }
 
     buckets.set(key, current);
@@ -509,4 +568,100 @@ export function getMeetingMixData(records) {
   return Array.from(buckets.entries())
     .map(([name, value]) => ({ name, value }))
     .sort((left, right) => right.value - left.value);
+}
+
+function getQuantile(sortedValues, quantile) {
+  if (!sortedValues.length) {
+    return 0;
+  }
+
+  const index = (sortedValues.length - 1) * quantile;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+
+  if (lowerIndex === upperIndex) {
+    return sortedValues[lowerIndex];
+  }
+
+  const lowerValue = sortedValues[lowerIndex];
+  const upperValue = sortedValues[upperIndex];
+  const weight = index - lowerIndex;
+
+  return lowerValue + ((upperValue - lowerValue) * weight);
+}
+
+export function getMeetingNeedAnalysis(records) {
+  const validRecords = records.filter((record) => Number.isFinite(record.actualDurationMinutes));
+  const durations = validRecords
+    .map((record) => record.actualDurationMinutes)
+    .sort((left, right) => left - right);
+
+  if (!durations.length) {
+    return {
+      durationVsTalkShareScatter: [],
+      durationNormalCurve: {
+        curve: [],
+        points: [],
+        percentiles: { p25: 0, p50: 0, p75: 0 },
+      },
+    };
+  }
+
+  const mean = durations.reduce((sum, value) => sum + value, 0) / durations.length;
+  const variance = durations.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / durations.length;
+  const stdDev = Math.sqrt(variance);
+  const minDuration = Math.max(0, durations[0] - 10);
+  const maxDuration = durations[durations.length - 1] + 10;
+  const steps = 80;
+  const range = Math.max(maxDuration - minDuration, 1);
+
+  const getDensity = (duration) => {
+    if (stdDev < 0.0001) {
+      return duration === mean ? 1 : 0;
+    }
+
+    const zScore = (duration - mean) / stdDev;
+    return (1 / (stdDev * Math.sqrt(2 * Math.PI))) * Math.exp(-((zScore ** 2) / 2));
+  };
+
+  const curve = Array.from({ length: steps + 1 }, (_, index) => {
+    const duration = minDuration + ((range * index) / steps);
+    return [Number(duration.toFixed(2)), Number(getDensity(duration).toFixed(6))];
+  });
+
+  const points = validRecords.map((record) => ({
+    value: [record.actualDurationMinutes, Number(getDensity(record.actualDurationMinutes).toFixed(6))],
+    id: record.id,
+    title: record.title,
+  }));
+
+  const durationVsTalkShareScatter = validRecords.map((record) => {
+    const nonExecutiveParticipants = getParticipantsExcludingExecutive(record);
+    const averageCounterpartTalkative = nonExecutiveParticipants.length
+      ? nonExecutiveParticipants.reduce((sum, participant) => sum + getParticipantScore(participant, 'talkativeScore'), 0)
+        / nonExecutiveParticipants.length
+      : 50;
+
+    return {
+      value: [record.actualDurationMinutes, Math.max(0, Math.min(100, 100 - averageCounterpartTalkative))],
+      id: record.id,
+      title: record.title,
+      participantSummary: nonExecutiveParticipants.length
+        ? nonExecutiveParticipants.map((participant) => participant.name).join(', ')
+        : 'No additional participants',
+    };
+  });
+
+  return {
+    durationVsTalkShareScatter,
+    durationNormalCurve: {
+      curve,
+      points,
+      percentiles: {
+        p25: getQuantile(durations, 0.25),
+        p50: getQuantile(durations, 0.5),
+        p75: getQuantile(durations, 0.75),
+      },
+    },
+  };
 }

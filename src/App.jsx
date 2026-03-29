@@ -23,6 +23,7 @@ import {
   getGranularityLabel,
   getHeatmapSeries,
   getLineSeries,
+  getMeetingNeedAnalysis,
   getMeetingMixData,
   getPage2PersonStats,
   getSummaryMetrics,
@@ -656,6 +657,7 @@ function App() {
     [filteredPersonStats, summary.averageDuration],
   );
   const meetingMixData = useMemo(() => getMeetingMixData(filteredMeetingData), [filteredMeetingData]);
+  const meetingNeedAnalysis = useMemo(() => getMeetingNeedAnalysis(filteredMeetingData), [filteredMeetingData]);
 
   const lineOption = {
     tooltip: {
@@ -1135,6 +1137,111 @@ function App() {
     ],
   };
 
+  const durationVsTalkShareOption = {
+    tooltip: {
+      trigger: 'item',
+      formatter: ({ data }) => {
+        if (!data) {
+          return 'No data';
+        }
+
+        return [
+          data.title,
+          `Participants: ${data.participantSummary}`,
+          `Duration: ${Math.round(data.value[0])} min`,
+          `Jacques talk time: ${Math.round(data.value[1])}%`,
+        ].join('<br/>');
+      },
+    },
+    grid: { top: 44, right: 20, bottom: 42, left: 56 },
+    xAxis: {
+      type: 'value',
+      name: 'Meeting duration (min)',
+      axisLabel: { color: '#5a6880' },
+      axisLine: { lineStyle: { color: '#93a1b7' } },
+      splitLine: { lineStyle: { color: 'rgba(63, 81, 112, 0.08)' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'My talk time (%)',
+      min: 0,
+      max: 100,
+      axisLabel: { color: '#5a6880', formatter: '{value}%' },
+      splitLine: { lineStyle: { color: 'rgba(63, 81, 112, 0.08)' } },
+    },
+    series: [
+      {
+        type: 'scatter',
+        data: meetingNeedAnalysis.durationVsTalkShareScatter,
+        symbolSize: 10,
+        itemStyle: { color: '#16324f', opacity: 0.78 },
+      },
+    ],
+  };
+
+  const normalCurveOption = {
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        if (params.seriesName === 'Meetings') {
+          return `${params.data.title}<br/>Duration: ${Math.round(params.data.value[0])} min`;
+        }
+
+        if (params.seriesName === 'Normal curve') {
+          return `Duration: ${Math.round(params.value[0])} min<br/>Density: ${params.value[1]}`;
+        }
+
+        return 'No data';
+      },
+    },
+    legend: {
+      top: 0,
+      textStyle: { color: '#40506b' },
+      data: ['Normal curve', 'Meetings'],
+    },
+    grid: { top: 52, right: 24, bottom: 44, left: 56 },
+    xAxis: {
+      type: 'value',
+      name: 'Meeting duration (min)',
+      axisLabel: { color: '#5a6880' },
+      axisLine: { lineStyle: { color: '#93a1b7' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Density',
+      axisLabel: { color: '#5a6880' },
+      splitLine: { lineStyle: { color: 'rgba(63, 81, 112, 0.08)' } },
+    },
+    series: [
+      {
+        name: 'Normal curve',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { color: '#4c8c77', width: 3 },
+        areaStyle: { color: 'rgba(76, 140, 119, 0.14)' },
+        markLine: {
+          symbol: 'none',
+          label: { color: '#40506b' },
+          lineStyle: { type: 'dashed', color: '#16324f' },
+          data: [
+            { xAxis: Number(meetingNeedAnalysis.durationNormalCurve.percentiles.p25.toFixed(2)), name: 'P25' },
+            { xAxis: Number(meetingNeedAnalysis.durationNormalCurve.percentiles.p50.toFixed(2)), name: 'P50' },
+            { xAxis: Number(meetingNeedAnalysis.durationNormalCurve.percentiles.p75.toFixed(2)), name: 'P75' },
+          ],
+        },
+        data: meetingNeedAnalysis.durationNormalCurve.curve,
+      },
+      {
+        name: 'Meetings',
+        type: 'scatter',
+        data: meetingNeedAnalysis.durationNormalCurve.points,
+        symbolSize: 9,
+        itemStyle: { color: '#c97342', opacity: 0.8 },
+      },
+    ],
+  };
+
   const expandedChartConfig = {
     line: {
       eyebrow: 'Trend',
@@ -1175,7 +1282,7 @@ function App() {
     p2Dot: {
       eyebrow: 'Cadence',
       title: 'Best overall meeting rhythm',
-      value: 'Each dot is a meeting with one person',
+      value: 'Each dot is one participant in one meeting',
       option: dotPlotOption,
     },
     p2HostAttendee: {
@@ -1195,6 +1302,18 @@ function App() {
       title: '1:1 vs 1:M meeting proportions',
       value: 'Subgrouped by staff, external, mixed',
       option: meetingMixOption,
+    },
+    p3DurationVsTalkShare: {
+      eyebrow: 'Voice balance',
+      title: 'Meeting duration vs my talk time %',
+      value: 'Jacques speaking share estimated from participant talkative profiles',
+      option: durationVsTalkShareOption,
+    },
+    p3Normal: {
+      eyebrow: 'Normal curve',
+      title: 'Meeting duration normal curve',
+      value: 'P25, median, and P75 are overlaid on the distribution',
+      option: normalCurveOption,
     },
   };
 
@@ -1232,7 +1351,7 @@ function App() {
         <nav>
           <button type="button" className={`nav-item${activePage === 'page1' ? ' active' : ''}`} onClick={() => navigateTo('page1')}>Page 1 · Meetings</button>
           <button type="button" className={`nav-item${activePage === 'page2' ? ' active' : ''}`} onClick={() => navigateTo('page2')}>Page 2 · People</button>
-          <button type="button" className="nav-item" disabled>Page 3 · Campaigns</button>
+          <button type="button" className={`nav-item${activePage === 'page3' ? ' active' : ''}`} onClick={() => navigateTo('page3')}>Page 3 · Do I really need a meetiing for this</button>
         </nav>
         <p className="sidebar-note">
           Use the page switcher to move between time-based and relationship-based meeting analysis.
@@ -1352,7 +1471,7 @@ function App() {
               </ChartCard>
             </section>
           </>
-        ) : (
+        ) : activePage === 'page2' ? (
           <>
             <header className="hero-card">
               <div>
@@ -1462,6 +1581,48 @@ function App() {
                 onExpand={() => setExpandedChart('p2MeetingMix')}
               >
                 <ReactEChartsCore echarts={echarts} option={meetingMixOption} style={{ height: 380 }} />
+              </ChartCard>
+            </section>
+          </>
+        ) : (
+          <>
+            <header className="hero-card">
+              <div>
+                <p className="hero-kicker">Page 3</p>
+                <h2>Do I really need a meetiing for this</h2>
+                <p className="hero-copy">A quick read on meeting duration shape and how much of each session you appear to be carrying.</p>
+              </div>
+              <div className="hero-side">
+                <div className="hero-tag">Range: {selectedRangeLabel} · {loading ? 'Loading data...' : `${summary.meetingsCount.toLocaleString()} meetings`}</div>
+                <DateRangeFilter
+                  startDate={startDateFilter}
+                  endDate={endDateFilter}
+                  minDate={minDateFilterValue}
+                  maxDate={maxDateFilterValue}
+                  onStartDateChange={handleStartDateChange}
+                  onEndDateChange={handleEndDateChange}
+                  disabled={loading || !availableDateRange}
+                />
+              </div>
+            </header>
+
+            <section className="charts-grid charts-grid-secondary">
+              <ChartCard
+                eyebrow="Voice balance"
+                title="Meeting duration vs my talk time %"
+                value="Jacques speaking share estimated from participant talkative profiles"
+                onExpand={() => setExpandedChart('p3DurationVsTalkShare')}
+              >
+                <ReactEChartsCore echarts={echarts} option={durationVsTalkShareOption} style={{ height: 360 }} />
+              </ChartCard>
+
+              <ChartCard
+                eyebrow="Normal curve"
+                title="Meeting duration normal curve"
+                value="P25, median, and P75 are overlaid on the distribution"
+                onExpand={() => setExpandedChart('p3Normal')}
+              >
+                <ReactEChartsCore echarts={echarts} option={normalCurveOption} style={{ height: 360 }} />
               </ChartCard>
             </section>
           </>

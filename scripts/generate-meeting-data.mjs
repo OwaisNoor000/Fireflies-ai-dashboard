@@ -56,8 +56,6 @@ const externalStakeholders = [
   { name: 'Omar Siddiq', company: 'BlueAnchor Partners' },
 ];
 
-const allInternalStaff = Array.from(new Set(Object.values(participantsByDepartment).flat()));
-
 const startDate = new Date();
 startDate.setMinutes(0, 0, 0);
 startDate.setHours(startDate.getHours() - (24 * 180));
@@ -80,6 +78,14 @@ function getMeetingAudienceType(staffCount, externalCount) {
   }
 
   return 'staff';
+}
+
+function getParticipantScores(name, hourOffset, meetingIndex, day) {
+  const nameSeed = name.split('').reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  return {
+    talkativeScore: clamp(25 + ((nameSeed + (hourOffset * 7) + (meetingIndex * 11) + day) % 66), 0, 100),
+    inquisitiveScore: clamp(20 + ((nameSeed + (hourOffset * 5) + (meetingIndex * 13) + (day * 3)) % 72), 0, 100),
+  };
 }
 
 const records = [];
@@ -140,17 +146,14 @@ for (let hourOffset = 0; hourOffset < 24 * 180; hourOffset += 1) {
       { name: executiveOwner, type: 'staff', company: internalCompany, isExecutive: true },
       ...staffAttendees.map((name) => ({ name, type: 'staff', company: internalCompany, isExecutive: false })),
       ...externalAttendees.map((entry) => ({ name: entry.name, type: 'external', company: entry.company, isExecutive: false })),
-    ];
+    ].map((participant) => ({
+      ...participant,
+      ...getParticipantScores(participant.name, hourOffset, meetingIndex, day),
+    }));
 
     const participants = participantDetails.map((entry) => entry.name);
 
-    const potentialCounterparts = participantDetails.filter((entry) => entry.name !== executiveOwner);
-    const counterpart = potentialCounterparts[(hourOffset + meetingIndex) % potentialCounterparts.length]
-      ?? { name: allInternalStaff[(hourOffset + meetingIndex) % allInternalStaff.length], type: 'staff', company: internalCompany };
-
     const jacquesRole = ((hourOffset + meetingIndex + day) % 4 === 0) ? 'attendee' : 'host';
-    const counterpartTalkativeScore = clamp(35 + ((hourOffset * 7 + meetingIndex * 11) % 64), 0, 100);
-    const counterpartInquisitiveScore = clamp(28 + ((hourOffset * 5 + meetingIndex * 13 + day * 3) % 72), 0, 100);
 
     const meetingSizeType = participantDetails.length === 2 ? '1:1' : '1:M';
     const meetingAudienceType = getMeetingAudienceType(staffAttendees.length, externalAttendees.length);
@@ -163,11 +166,6 @@ for (let hourOffset = 0; hourOffset < 24 * 180; hourOffset += 1) {
       ownerCategory,
       ownerName,
       jacquesRole,
-      counterpartName: counterpart.name,
-      counterpartType: counterpart.type,
-      counterpartCompany: counterpart.company,
-      counterpartTalkativeScore,
-      counterpartInquisitiveScore,
       meetingSizeType,
       meetingAudienceType,
       startTime: date.toISOString(),
