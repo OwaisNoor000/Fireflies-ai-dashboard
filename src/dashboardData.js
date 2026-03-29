@@ -14,6 +14,7 @@ const GRANULARITY_LABELS = {
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const FREE_EMAIL_DOMAINS = new Set(['gmail.com', 'outlook.com', 'hotmail.com', 'live.com']);
 
 function startOfDay(date) {
   const result = new Date(date);
@@ -89,8 +90,9 @@ export function getLineSeries(records, granularity) {
       label = `${MONTH_LABELS[date.getMonth()]} ${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:00`;
     }
 
-    const current = buckets.get(key) ?? { label, value: 0 };
+    const current = buckets.get(key) ?? { label, value: 0, count: 0 };
     current.value += record.actualDurationMinutes;
+    current.count += 1;
     buckets.set(key, current);
   });
 
@@ -99,6 +101,7 @@ export function getLineSeries(records, granularity) {
     .map(([, entry]) => ({
       label: entry.label,
       value: entry.value,
+      count: entry.count,
     }));
 }
 
@@ -106,15 +109,35 @@ export function getDepartmentBreakdown(records, granularity) {
   const buckets = new Map();
 
   records.forEach((record) => {
-    buckets.set(record.department, (buckets.get(record.department) ?? 0) + record.actualDurationMinutes);
+    const current = buckets.get(record.department) ?? {
+      totalMinutes: 0,
+      meetingCount: 0,
+      durations: [],
+    };
+    current.totalMinutes += record.actualDurationMinutes;
+    current.meetingCount += 1;
+    current.durations.push(record.actualDurationMinutes);
+    buckets.set(record.department, current);
   });
 
   return Array.from(buckets.entries())
-    .map(([name, value]) => ({
-      name,
-      value: formatValue(value, granularity),
-    }))
-    .sort((left, right) => right.value - left.value);
+    .map(([name, entry]) => {
+      const sortedDurations = [...entry.durations].sort((left, right) => left - right);
+      const middle = Math.floor(sortedDurations.length / 2);
+      const medianDurationMinutes = sortedDurations.length % 2 === 0
+        ? (sortedDurations[middle - 1] + sortedDurations[middle]) / 2
+        : sortedDurations[middle];
+
+      return {
+        name,
+        value: formatValue(entry.totalMinutes, granularity),
+        totalMinutes: entry.totalMinutes,
+        meetingCount: entry.meetingCount,
+        averageDurationMinutes: entry.meetingCount ? entry.totalMinutes / entry.meetingCount : 0,
+        medianDurationMinutes,
+      };
+    })
+    .sort((left, right) => right.totalMinutes - left.totalMinutes);
 }
 
 export function getCampaignBreakdown(records, granularity) {
@@ -130,6 +153,111 @@ export function getCampaignBreakdown(records, granularity) {
       value: formatValue(value, granularity),
     }))
     .sort((left, right) => right.value - left.value);
+}
+
+function titleCase(value) {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function getCompanyNameFromDomain(domain) {
+  const normalizedDomain = domain.trim().toLowerCase();
+
+  if (!normalizedDomain) {
+    return 'Unknown';
+  }
+
+  if (FREE_EMAIL_DOMAINS.has(normalizedDomain)) {
+    return 'Unknown';
+  }
+
+  const labels = normalizedDomain.split('.').filter(Boolean);
+  const root = labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+  return root ? titleCase(root) : 'Unknown';
+}
+
+function getEmailDomain(value) {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+  const atIndex = trimmed.lastIndexOf('@');
+
+  if (atIndex <= 0 || atIndex === trimmed.length - 1) {
+    return null;
+  }
+
+  return trimmed.slice(atIndex + 1);
+}
+
+function extractAttendeeEmailDomains(record) {
+  const emails = [];
+
+  if (Array.isArray(record.attendeeEmails)) {
+    emails.push(...record.attendeeEmails);
+  }
+
+  if (Array.isArray(record.participantEmails)) {
+    emails.push(...record.participantEmails);
+  }
+
+  if (Array.isArray(record.participants)) {
+    emails.push(...record.participants);
+  }
+
+  if (Array.isArray(record.participantDetails)) {
+    record.participantDetails.forEach((participant) => {
+      if (participant?.email) {
+        emails.push(participant.email);
+      }
+    });
+  }
+
+  return Array.from(new Set(emails
+    .map((email) => getEmailDomain(email))
+    .filter(Boolean)));
+}
+
+export function getCompanyTimeBreakdown(records, granularity = 'hours') {
+  const buckets = new Map();
+
+  records.forEach((record) => {
+    let companyNames = extractAttendeeEmailDomains(record)
+      .map((domain) => getCompanyNameFromDomain(domain))
+      .filter(Boolean);
+
+    if (!companyNames.length) {
+      companyNames = [sanitizeCompany(record.counterpartCompany)];
+    }
+
+    const share = companyNames.length ? record.actualDurationMinutes / companyNames.length : record.actualDurationMinutes;
+
+    companyNames.forEach((companyName) => {
+      const normalizedCompany = companyName && companyName.trim() ? companyName : 'Unknown';
+      const current = buckets.get(normalizedCompany) ?? {
+        totalMinutes: 0,
+        meetingCount: 0,
+      };
+
+      current.totalMinutes += share;
+      current.meetingCount += 1;
+      buckets.set(normalizedCompany, current);
+    });
+  });
+
+  return Array.from(buckets.entries())
+    .map(([name, entry]) => ({
+      name,
+      value: formatValue(entry.totalMinutes, granularity),
+      totalMinutes: entry.totalMinutes,
+      meetingCount: entry.meetingCount,
+      averageDurationMinutes: entry.meetingCount ? entry.totalMinutes / entry.meetingCount : 0,
+    }))
+    .sort((left, right) => right.totalMinutes - left.totalMinutes);
 }
 
 export function getHeatmapSeries(records, granularity) {

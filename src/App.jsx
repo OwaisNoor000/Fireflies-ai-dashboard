@@ -5,6 +5,7 @@ import {
   DataZoomComponent,
   GridComponent,
   LegendComponent,
+  ToolboxComponent,
   TooltipComponent,
   VisualMapComponent,
 } from 'echarts/components';
@@ -13,7 +14,7 @@ import ReactEChartsCore from 'echarts-for-react/lib/core';
 import {
   filterPersonStatsByCompany,
   formatValue,
-  getCampaignBreakdown,
+  getCompanyTimeBreakdown,
   getCompanyOptions,
   getDepartmentBreakdown,
   getDotPlotData,
@@ -38,13 +39,239 @@ echarts.use([
   LineChart,
   PieChart,
   ScatterChart,
+  ToolboxComponent,
   TooltipComponent,
   TreemapChart,
   VisualMapComponent,
 ]);
 
 const GRANULARITIES = ['months', 'weeks', 'days', 'hours'];
-const OWNER_FILTERS = ['by you', 'by other staff'];
+
+function formatDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInputValue(value) {
+  if (!value) {
+    return null;
+  }
+
+  const [year, month, day] = value.split('-').map((segment) => Number(segment));
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function formatDateTag(value) {
+  const parsedDate = parseDateInputValue(value);
+
+  if (!parsedDate) {
+    return 'N/A';
+  }
+
+  return parsedDate.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function getTrendPhrase(values) {
+  if (!values.length) {
+    return 'no clear trend';
+  }
+
+  const first = values[0] ?? 0;
+  const last = values[values.length - 1] ?? 0;
+
+  if (Math.abs(first) < 0.001 && Math.abs(last) < 0.001) {
+    return 'flat trend';
+  }
+
+  if (Math.abs(first) < 0.001) {
+    return 'strong increase';
+  }
+
+  const changeRatio = (last - first) / Math.abs(first);
+
+  if (changeRatio >= 0.35) {
+    return 'strong increase';
+  }
+
+  if (changeRatio >= 0.1) {
+    return 'slight increase';
+  }
+
+  if (changeRatio <= -0.35) {
+    return 'strong decrease';
+  }
+
+  if (changeRatio <= -0.1) {
+    return 'slight decrease';
+  }
+
+  return 'mostly stable';
+}
+
+function getDepartmentImportanceHint(departmentBreakdown) {
+  if (departmentBreakdown.length < 3) {
+    return 'all departments are equal to you\nFocus on most lucrative one; delegate the rest';
+  }
+
+  const ranked = [...departmentBreakdown].sort(
+    (left, right) => right.averageDurationMinutes - left.averageDurationMinutes,
+  );
+
+  const topAverage = ranked[0]?.averageDurationMinutes ?? 0;
+  const secondAverage = ranked[1]?.averageDurationMinutes ?? 0;
+  const thirdAverage = ranked[2]?.averageDurationMinutes ?? 0;
+
+  const topIsClearlyHigher = topAverage - secondAverage >= 60;
+  const topTwoAreClearlyHigher = secondAverage - thirdAverage >= 60;
+
+  if (topIsClearlyHigher || topTwoAreClearlyHigher) {
+    const highlightedDepartment = topTwoAreClearlyHigher
+      ? `${ranked[0].name} and ${ranked[1].name}`
+      : ranked[0].name;
+
+    return `${highlightedDepartment} deparment the most important to you. Does it make you the most money?`;
+  }
+
+    return 'all departments are equal to you\nFocus on most lucrative one; delegate the rest';
+}
+
+function getMeetingConcentrationHint(records) {
+  if (!records.length) {
+    return 'meetings are spread througout the week';
+  }
+
+  const dayLabels = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const periods = ['mornings', 'afternoons', 'evenings', 'nights'];
+  const dayCounts = new Array(7).fill(0);
+  const periodCounts = { mornings: 0, afternoons: 0, evenings: 0, nights: 0 };
+  let validRecordCount = 0;
+
+  function formatNaturalList(values) {
+    if (!values.length) {
+      return '';
+    }
+
+    if (values.length === 1) {
+      return values[0];
+    }
+
+    if (values.length === 2) {
+      return `${values[0]} and ${values[1]}`;
+    }
+
+    return `${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}`;
+  }
+
+  records.forEach((record) => {
+    const date = new Date(record.startTime);
+    if (!Number.isFinite(date.getTime())) {
+      return;
+    }
+
+    validRecordCount += 1;
+
+    const dayIndex = date.getDay();
+    const hour = date.getHours();
+    dayCounts[dayIndex] += 1;
+
+    if (hour >= 5 && hour < 12) {
+      periodCounts.mornings += 1;
+    } else if (hour >= 12 && hour < 17) {
+      periodCounts.afternoons += 1;
+    } else if (hour >= 17 && hour < 22) {
+      periodCounts.evenings += 1;
+    } else {
+      periodCounts.nights += 1;
+    }
+  });
+
+  if (!validRecordCount) {
+    return 'meetings are spread througout the week';
+  }
+
+  const averageDayVolume = validRecordCount / dayLabels.length;
+  const dominantDayLabels = dayCounts
+    .map((count, dayIndex) => ({ count, dayLabel: dayLabels[dayIndex] }))
+    .filter((entry) => entry.count >= averageDayVolume * 1.2)
+    .map((entry) => entry.dayLabel);
+
+  const averagePeriodVolume = validRecordCount / periods.length;
+  const dominantPeriods = periods.filter((period) => periodCounts[period] >= averagePeriodVolume * 1.2);
+
+  if (!dominantDayLabels.length && !dominantPeriods.length) {
+    return 'meetings are spread througout the week';
+  }
+
+  const dayPhrase = formatNaturalList(dominantDayLabels);
+  const periodPhrase = formatNaturalList(dominantPeriods);
+
+  if (dominantDayLabels.length && dominantPeriods.length === 1) {
+    return `meetings are concentrated on ${dayPhrase} ${periodPhrase}`;
+  }
+
+  if (dominantDayLabels.length && dominantPeriods.length > 1) {
+    return `meetings are concentrated on ${dayPhrase} during ${periodPhrase}`;
+  }
+
+  return `meetings are concentrated in ${periodPhrase}`;
+}
+
+function getCompanyDemandHint(companySeries) {
+  if (companySeries.length < 2) {
+    return 'All companies demand equal times';
+  }
+
+  const ranked = [...companySeries].sort((left, right) => right.totalMinutes - left.totalMinutes);
+  const totalMinutes = ranked.reduce((sum, item) => sum + item.totalMinutes, 0);
+  if (!totalMinutes) {
+    return 'All companies demand equal times';
+  }
+
+  const topShare = ranked[0].totalMinutes / totalMinutes;
+  const secondShare = ranked[1].totalMinutes / totalMinutes;
+
+  if (topShare >= 0.45 || (topShare - secondShare) >= 0.15) {
+    return `${ranked[0].name} demands most time; is it an important customer?`;
+  }
+
+  return 'All companies demand equal times';
+}
+
+function getMeetingControlHint(durationBuckets) {
+  const totals = durationBuckets.reduce((accumulator, bucket) => ({
+    byYou: accumulator.byYou + bucket.byYou,
+    byOtherStaff: accumulator.byOtherStaff + bucket.byOtherStaff,
+  }), { byYou: 0, byOtherStaff: 0 });
+
+  if (totals.byYou > totals.byOtherStaff * 1.5) {
+    return 'You have control of your meetings';
+  }
+
+  if (totals.byYou < totals.byOtherStaff * 0.5) {
+    return 'You have little control of your meetings';
+  }
+
+  return 'You have moderate control of your meetings';
+}
+
+function getDecisionMakerHint(people) {
+  if (!people.length) {
+    return 'is this person an important decision maker?';
+  }
+
+  return `is ${people[0].person} an important decision maker?`;
+}
 
 function ExpandIcon() {
   return (
@@ -98,7 +325,44 @@ function SegmentedControl({ value, options, onChange }) {
   );
 }
 
-function ChartCard({ eyebrow, title, value, children, granularity, onGranularityChange, extraAction, onExpand }) {
+function DateRangeFilter({
+  startDate,
+  endDate,
+  minDate,
+  maxDate,
+  onStartDateChange,
+  onEndDateChange,
+  disabled,
+}) {
+  return (
+    <div className="date-filter" role="group" aria-label="Date range filter">
+      <label className="date-filter-field">
+        <span>Start</span>
+        <input
+          type="date"
+          value={startDate}
+          min={minDate}
+          max={maxDate}
+          disabled={disabled}
+          onChange={(event) => onStartDateChange(event.target.value)}
+        />
+      </label>
+      <label className="date-filter-field">
+        <span>End</span>
+        <input
+          type="date"
+          value={endDate}
+          min={minDate}
+          max={maxDate}
+          disabled={disabled}
+          onChange={(event) => onEndDateChange(event.target.value)}
+        />
+      </label>
+    </div>
+  );
+}
+
+function ChartCard({ eyebrow, title, value, children, granularity, onGranularityChange, extraAction, onExpand, infoHint }) {
   return (
     <section className="chart-card">
       <div className="chart-header">
@@ -110,6 +374,16 @@ function ChartCard({ eyebrow, title, value, children, granularity, onGranularity
         <div className="chart-actions">
           {onExpand ? (
             <div className="chart-toolbar">
+              {infoHint ? (
+                <button
+                  type="button"
+                  className="chart-info-button"
+                  aria-label={`${title} trend insight: ${infoHint}`}
+                  title={infoHint}
+                >
+                  ?
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="chart-expand-button"
@@ -177,13 +451,10 @@ function App() {
   const [expandedChart, setExpandedChart] = useState(null);
 
   const [lineGranularity, setLineGranularity] = useState('weeks');
-  const [departmentGranularity, setDepartmentGranularity] = useState('hours');
-  const [campaignGranularity, setCampaignGranularity] = useState('hours');
-  const [heatmapGranularity, setHeatmapGranularity] = useState('days');
-  const [durationOwnerFilter, setDurationOwnerFilter] = useState('by you');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
 
   const [page2CompanyFilter, setPage2CompanyFilter] = useState('All companies');
-  const [page2PeopleGranularity, setPage2PeopleGranularity] = useState('hours');
   const [page2RoleGranularity, setPage2RoleGranularity] = useState('hours');
   const [page2TrendGranularity, setPage2TrendGranularity] = useState('weeks');
 
@@ -227,25 +498,154 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [expandedChart]);
 
-  const summary = getSummaryMetrics(meetingData);
+  const availableDateRange = useMemo(() => {
+    const timestamps = meetingData
+      .map((record) => new Date(record.startTime).getTime())
+      .filter((value) => Number.isFinite(value));
 
-  const lineSeries = getLineSeries(meetingData, lineGranularity);
-  const departmentSeries = getDepartmentBreakdown(meetingData, departmentGranularity);
-  const campaignSeries = getCampaignBreakdown(meetingData, campaignGranularity);
-  const heatmapSeries = getHeatmapSeries(meetingData, heatmapGranularity);
-  const durationHistogram = getDurationHistogram(meetingData);
+    if (!timestamps.length) {
+      return null;
+    }
 
-  const personStats = useMemo(() => getPage2PersonStats(meetingData), [meetingData]);
+    return {
+      minDate: new Date(Math.min(...timestamps)),
+      maxDate: new Date(Math.max(...timestamps)),
+    };
+  }, [meetingData]);
+
+  useEffect(() => {
+    if (!availableDateRange) {
+      return;
+    }
+
+    const minDate = formatDateInputValue(availableDateRange.minDate);
+    const maxDate = formatDateInputValue(availableDateRange.maxDate);
+
+    setStartDateFilter((current) => current || minDate);
+    setEndDateFilter((current) => current || maxDate);
+  }, [availableDateRange]);
+
+  const minDateFilterValue = availableDateRange ? formatDateInputValue(availableDateRange.minDate) : '';
+  const maxDateFilterValue = availableDateRange ? formatDateInputValue(availableDateRange.maxDate) : '';
+
+  const filteredMeetingData = useMemo(() => {
+    const startBoundary = parseDateInputValue(startDateFilter);
+    const endBoundary = parseDateInputValue(endDateFilter);
+
+    if (endBoundary) {
+      endBoundary.setHours(23, 59, 59, 999);
+    }
+
+    return meetingData.filter((record) => {
+      const recordDate = new Date(record.startTime);
+
+      if (!Number.isFinite(recordDate.getTime())) {
+        return false;
+      }
+
+      if (startBoundary && recordDate < startBoundary) {
+        return false;
+      }
+
+      if (endBoundary && recordDate > endBoundary) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [endDateFilter, meetingData, startDateFilter]);
+
+  const selectedRangeLabel = startDateFilter && endDateFilter
+    ? `${formatDateTag(startDateFilter)} - ${formatDateTag(endDateFilter)}`
+    : 'All dates';
+
+  function handleStartDateChange(nextStartDate) {
+    setStartDateFilter(nextStartDate);
+
+    if (endDateFilter && nextStartDate && nextStartDate > endDateFilter) {
+      setEndDateFilter(nextStartDate);
+    }
+  }
+
+  function handleEndDateChange(nextEndDate) {
+    setEndDateFilter(nextEndDate);
+
+    if (startDateFilter && nextEndDate && nextEndDate < startDateFilter) {
+      setStartDateFilter(nextEndDate);
+    }
+  }
+
+  const summary = getSummaryMetrics(filteredMeetingData);
+
+  const lineSeries = getLineSeries(filteredMeetingData, lineGranularity);
+  const lineGranularityLabel = getGranularityLabel(lineGranularity).toLowerCase();
+  const lineValues = useMemo(
+    () => lineSeries.map((item) => formatValue(item.value, lineGranularity)),
+    [lineGranularity, lineSeries],
+  );
+  const lineTrendValues = useMemo(
+    () => {
+      if (!lineValues.length) {
+        return [];
+      }
+
+      if (lineValues.length === 1) {
+        return [lineValues[0]];
+      }
+
+      const points = lineValues.map((value, index) => ({ x: index, y: value }));
+      const n = points.length;
+      const sumX = points.reduce((sum, point) => sum + point.x, 0);
+      const sumY = points.reduce((sum, point) => sum + point.y, 0);
+      const sumXY = points.reduce((sum, point) => sum + (point.x * point.y), 0);
+      const sumXSquare = points.reduce((sum, point) => sum + (point.x * point.x), 0);
+
+      const denominator = (n * sumXSquare) - (sumX * sumX);
+      if (Math.abs(denominator) < 0.000001) {
+        return [...lineValues];
+      }
+
+      const slope = ((n * sumXY) - (sumX * sumY)) / denominator;
+      const intercept = (sumY - (slope * sumX)) / n;
+
+      return points.map((point) => Number((intercept + (slope * point.x)).toFixed(2)));
+    },
+    [lineValues],
+  );
+  const lineTrendPhrase = useMemo(() => getTrendPhrase(lineTrendValues), [lineTrendValues]);
+  const departmentSeries = getDepartmentBreakdown(filteredMeetingData, 'hours');
+  const departmentInsight = useMemo(
+    () => getDepartmentImportanceHint(departmentSeries),
+    [departmentSeries],
+  );
+  const companySeries = useMemo(() => getCompanyTimeBreakdown(filteredMeetingData, 'hours'), [filteredMeetingData]);
+  const companyDemandHint = useMemo(() => getCompanyDemandHint(companySeries), [companySeries]);
+  const heatmapSeries = getHeatmapSeries(filteredMeetingData, 'hours');
+  const heatmapConcentrationHint = useMemo(() => getMeetingConcentrationHint(filteredMeetingData), [filteredMeetingData]);
+  const durationHistogram = getDurationHistogram(filteredMeetingData);
+  const meetingControlHint = useMemo(() => getMeetingControlHint(durationHistogram), [durationHistogram]);
+
+  const personStats = useMemo(() => getPage2PersonStats(filteredMeetingData), [filteredMeetingData]);
   const companyOptions = useMemo(() => getCompanyOptions(personStats), [personStats]);
+  useEffect(() => {
+    if (!companyOptions.includes(page2CompanyFilter)) {
+      setPage2CompanyFilter('All companies');
+    }
+  }, [companyOptions, page2CompanyFilter]);
   const filteredPersonStats = useMemo(
     () => filterPersonStatsByCompany(personStats, page2CompanyFilter),
     [page2CompanyFilter, personStats],
   );
-  const bestFriend = filteredPersonStats[0];
-  const dotPlotData = useMemo(() => getDotPlotData(meetingData, page2CompanyFilter), [meetingData, page2CompanyFilter]);
+  const topPeopleForChart = useMemo(() => filteredPersonStats.slice(0, 30), [filteredPersonStats]);
+  const decisionMakerHint = useMemo(() => getDecisionMakerHint(topPeopleForChart), [topPeopleForChart]);
+  const topThreeBestFriends = filteredPersonStats.slice(0, 3);
+  const dotPlotData = useMemo(
+    () => getDotPlotData(filteredMeetingData, page2CompanyFilter),
+    [filteredMeetingData, page2CompanyFilter],
+  );
   const externalVsStaffTrend = useMemo(
-    () => getExternalVsStaffTrend(meetingData, page2TrendGranularity),
-    [meetingData, page2TrendGranularity],
+    () => getExternalVsStaffTrend(filteredMeetingData, page2TrendGranularity),
+    [filteredMeetingData, page2TrendGranularity],
   );
   const talkativeTop = useMemo(
     () => getTopPeopleByScore(filteredPersonStats, 'talkativeScore', summary.averageDuration),
@@ -255,17 +655,52 @@ function App() {
     () => getTopPeopleByScore(filteredPersonStats, 'inquisitiveScore', summary.averageDuration),
     [filteredPersonStats, summary.averageDuration],
   );
-  const meetingMixData = useMemo(() => getMeetingMixData(meetingData), [meetingData]);
+  const meetingMixData = useMemo(() => getMeetingMixData(filteredMeetingData), [filteredMeetingData]);
 
   const lineOption = {
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
         const point = params[0];
-        return `${point.axisValue}<br/>${formatValue(point.value, lineGranularity)} ${getGranularityLabel(lineGranularity).toLowerCase()}`;
+        const bucket = lineSeries[point.dataIndex];
+        const trendPoint = params.find((item) => item.seriesName === 'Average trend');
+
+        if (!bucket) {
+          return `${point.axisValue}<br/>No data`;
+        }
+
+        const total = formatValue(bucket.value, lineGranularity);
+        const average = bucket.count ? bucket.value / bucket.count : 0;
+
+        return [
+          point.axisValue,
+          `${point.marker} Total: ${total} ${lineGranularityLabel}`,
+          `Avg meeting duration: ${Math.round(average)} min`,
+          `Meetings: ${bucket.count}`,
+          trendPoint ? `${trendPoint.marker} Average trend: ${trendPoint.value} ${lineGranularityLabel}` : null,
+        ].filter(Boolean).join('<br/>');
       },
     },
-    grid: { top: 20, right: 20, bottom: 34, left: 44 },
+    legend: {
+      top: 0,
+      textStyle: { color: '#40506b' },
+      itemWidth: 12,
+      itemHeight: 12,
+    },
+    toolbox: {
+      right: 8,
+      top: 0,
+      feature: {
+        dataZoom: { yAxisIndex: 'none' },
+        restore: {},
+      },
+      iconStyle: { borderColor: '#5a6880' },
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+      { type: 'slider', xAxisIndex: 0, height: 18, bottom: 4, borderColor: 'rgba(63, 81, 112, 0.15)' },
+    ],
+    grid: { top: 54, right: 20, bottom: 56, left: 44 },
     xAxis: {
       type: 'category',
       boundaryGap: false,
@@ -280,6 +715,7 @@ function App() {
     },
     series: [
       {
+        name: 'Total time',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -297,14 +733,35 @@ function App() {
             ],
           },
         },
-        data: lineSeries.map((item) => formatValue(item.value, lineGranularity)),
+        data: lineValues,
+      },
+      {
+        name: 'Average trend',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 2, type: 'dashed', color: '#c97342' },
+        itemStyle: { color: '#c97342' },
+        data: lineTrendValues,
       },
     ],
   };
 
   const departmentOption = {
     tooltip: {
-      formatter: ({ name, value }) => `${name}<br/>${value} ${getGranularityLabel(departmentGranularity).toLowerCase()}`,
+      formatter: ({ data }) => {
+        if (!data) {
+          return 'No data';
+        }
+
+        return [
+          data.name,
+          `Total duration: ${formatValue(data.totalMinutes, 'hours')} hours`,
+          `Avg duration: ${Math.round(data.averageDurationMinutes)} min`,
+          `Median duration: ${Math.round(data.medianDurationMinutes)} min`,
+          `Meetings: ${data.meetingCount}`,
+        ].join('<br/>');
+      },
     },
     series: [
       {
@@ -325,17 +782,36 @@ function App() {
         label: {
           color: '#f4f1ea',
           fontWeight: 600,
-          formatter: '{b}\n{c}',
+          formatter: ({ data }) => {
+            if (!data) {
+              return '';
+            }
+
+            const totalHours = formatValue(data.totalMinutes, 'hours');
+            const averageMinutes = Math.round(data.averageDurationMinutes);
+            const medianMinutes = Math.round(data.medianDurationMinutes);
+            return `${data.name}\nTotal: ${totalHours}h\nAvg: ${averageMinutes}m\nMedian: ${medianMinutes}m`;
+          },
         },
         data: departmentSeries,
       },
     ],
   };
 
-  const campaignOption = {
+  const companyOption = {
     tooltip: {
       trigger: 'item',
-      formatter: ({ name, value, percent }) => `${name}<br/>${value} ${getGranularityLabel(campaignGranularity).toLowerCase()} (${percent}%)`,
+      formatter: ({ data, percent }) => {
+        if (!data) {
+          return 'No data';
+        }
+
+        return [
+          data.name,
+          `Total duration: ${formatValue(data.totalMinutes, 'hours')} hours (${percent}%)`,
+          `Avg duration: ${Math.round(data.averageDurationMinutes)} min`,
+        ].join('<br/>');
+      },
     },
     legend: {
       bottom: 0,
@@ -356,7 +832,7 @@ function App() {
           borderWidth: 3,
         },
         color: ['#16324f', '#c97342', '#4c8c77', '#d7b97f', '#7b8ba5', '#a94f58'],
-        data: campaignSeries,
+        data: companySeries,
       },
     ],
   };
@@ -371,7 +847,7 @@ function App() {
       type: 'category',
       data: heatmapSeries.xAxis,
       splitArea: { show: false },
-      axisLabel: { color: '#5a6880', rotate: heatmapGranularity === 'hours' ? 0 : 35, hideOverlap: true },
+      axisLabel: { color: '#5a6880', rotate: 0, hideOverlap: true },
       axisLine: { lineStyle: { color: '#93a1b7' } },
     },
     yAxis: {
@@ -407,8 +883,21 @@ function App() {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       formatter: (params) => {
-        const lines = params.map((item) => `${item.marker} ${item.seriesName}: ${item.value} meetings`);
-        return `${params[0].axisValue}<br/>${lines.join('<br/>')}`;
+        const bucket = durationHistogram.find((entry) => entry.label === params[0].axisValue);
+        if (!bucket) {
+          return `${params[0].axisValue}<br/>No data`;
+        }
+
+        const total = bucket.byYou + bucket.byOtherStaff;
+        const byYouPct = total ? (bucket.byYou / total) * 100 : 0;
+        const byOtherPct = total ? (bucket.byOtherStaff / total) * 100 : 0;
+
+        return [
+          params[0].axisValue,
+          `${params[0].marker} By you: ${Math.round(byYouPct)}% (${bucket.byYou} meetings)`,
+          `${params[1].marker} By other staff: ${Math.round(byOtherPct)}% (${bucket.byOtherStaff} meetings)`,
+          `Total meetings: ${total}`,
+        ].join('<br/>');
       },
     },
     legend: {
@@ -424,57 +913,113 @@ function App() {
     },
     yAxis: {
       type: 'value',
-      name: 'Meetings',
-      axisLabel: { color: '#5a6880' },
+      max: 100,
+      name: 'Share of meetings (%)',
+      axisLabel: { color: '#5a6880', formatter: '{value}%' },
       splitLine: { lineStyle: { color: 'rgba(63, 81, 112, 0.08)' } },
     },
     series: [
       {
         name: 'By you',
         type: 'bar',
-        data: durationHistogram.map((item) => item.byYou),
+        stack: 'ownership',
+        data: durationHistogram.map((item) => {
+          const total = item.byYou + item.byOtherStaff;
+          return total ? Number(((item.byYou / total) * 100).toFixed(1)) : 0;
+        }),
+        label: {
+          show: true,
+          position: 'inside',
+          color: '#f4f1ea',
+          fontWeight: 600,
+          formatter: ({ value }) => (value ? `${Math.round(value)}%` : ''),
+        },
         itemStyle: {
           color: '#16324f',
-          borderRadius: [8, 8, 0, 0],
-          opacity: durationOwnerFilter === 'by you' ? 1 : 0.34,
+          borderRadius: [0, 0, 0, 0],
         },
       },
       {
         name: 'By other staff',
         type: 'bar',
-        data: durationHistogram.map((item) => item.byOtherStaff),
+        stack: 'ownership',
+        data: durationHistogram.map((item) => {
+          const total = item.byYou + item.byOtherStaff;
+          return total ? Number(((item.byOtherStaff / total) * 100).toFixed(1)) : 0;
+        }),
+        label: {
+          show: true,
+          position: 'inside',
+          color: '#ffffff',
+          fontWeight: 600,
+          formatter: ({ value }) => (value ? `${Math.round(value)}%` : ''),
+        },
         itemStyle: {
           color: '#c97342',
           borderRadius: [8, 8, 0, 0],
-          opacity: durationOwnerFilter === 'by other staff' ? 1 : 0.34,
         },
       },
     ],
   };
 
   const personTimeOption = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { top: 20, right: 20, bottom: 28, left: 140 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params) => {
+        const activeBar = params.find((item) => Number(item.value) > 0) ?? params[0];
+        const person = topPeopleForChart[activeBar.dataIndex];
+        const isInternal = (person?.company || '').trim().toLowerCase() === 'denteel';
+        const personType = isInternal ? 'Internal (Denteel)' : 'External';
+
+        return [
+          person?.person || activeBar.name,
+          `${activeBar.marker} Total time: ${activeBar.value} hours`,
+          `Type: ${personType}`,
+        ].join('<br/>');
+      },
+    },
+    legend: {
+      top: 0,
+      textStyle: { color: '#40506b' },
+      data: ['Internal (Denteel)', 'External'],
+    },
+    grid: { top: 44, right: 20, bottom: 28, left: 140 },
     dataZoom: [
       { type: 'inside', yAxisIndex: 0 },
       { type: 'slider', yAxisIndex: 0, width: 12, right: 4, top: 24, bottom: 30 },
     ],
     xAxis: {
       type: 'value',
-      name: getGranularityLabel(page2PeopleGranularity),
+      name: getGranularityLabel('hours'),
       axisLabel: { color: '#5a6880' },
       splitLine: { lineStyle: { color: 'rgba(63, 81, 112, 0.08)' } },
     },
     yAxis: {
       type: 'category',
-      data: filteredPersonStats.map((entry) => entry.person),
+      data: topPeopleForChart.map((entry) => entry.person),
       axisLabel: { color: '#5a6880' },
     },
     series: [
       {
+        name: 'Internal (Denteel)',
         type: 'bar',
-        data: filteredPersonStats.map((entry) => formatValue(entry.totalMinutes, page2PeopleGranularity)),
+        stack: 'personType',
+        data: topPeopleForChart.map((entry) => {
+          const isInternal = (entry.company || '').trim().toLowerCase() === 'denteel';
+          return isInternal ? formatValue(entry.totalMinutes, 'hours') : 0;
+        }),
         itemStyle: { color: '#16324f', borderRadius: [0, 8, 8, 0] },
+      },
+      {
+        name: 'External',
+        type: 'bar',
+        stack: 'personType',
+        data: topPeopleForChart.map((entry) => {
+          const isInternal = (entry.company || '').trim().toLowerCase() === 'denteel';
+          return isInternal ? 0 : formatValue(entry.totalMinutes, 'hours');
+        }),
+        itemStyle: { color: '#c97342', borderRadius: [0, 8, 8, 0] },
       },
     ],
   };
@@ -600,31 +1145,31 @@ function App() {
     department: {
       eyebrow: 'Load',
       title: 'Time spent by department',
-      value: `Treemap sized in ${getGranularityLabel(departmentGranularity).toLowerCase()}`,
+      value: 'Each block shows total, average, and median duration',
       option: departmentOption,
     },
     campaign: {
-      eyebrow: 'Campaigns',
-      title: 'Time spent per campaign',
-      value: `Donut values shown in ${getGranularityLabel(campaignGranularity).toLowerCase()}`,
-      option: campaignOption,
+      eyebrow: 'Companies',
+      title: 'Time spent per company',
+      value: 'Donut values shown in hours with average duration on hover',
+      option: companyOption,
     },
     heatmap: {
       eyebrow: 'Density',
       title: 'Days with the most meetings',
-      value: `Heat map pivoted by ${getGranularityLabel(heatmapGranularity).toLowerCase()}`,
+      value: 'Heat map by hour of day only',
       option: heatmapOption,
     },
     duration: {
       eyebrow: 'Distribution',
       title: 'Meetings by duration range',
-      value: `Focused on ${durationOwnerFilter}`,
+      value: 'Stacked by hosted ownership percentages',
       option: durationOption,
     },
     p2PeopleTime: {
       eyebrow: 'People',
       title: 'Total time spent per person',
-      value: `Filter: ${page2CompanyFilter} · Unit: ${getGranularityLabel(page2PeopleGranularity).toLowerCase()}`,
+      value: `Filter: ${page2CompanyFilter} · Top 30 · Unit: hours · Color: internal vs external`,
       option: personTimeOption,
     },
     p2Dot: {
@@ -714,7 +1259,18 @@ function App() {
                 <h2>How much time do I spend on meetings?</h2>
                 <p className="hero-copy">This view tracks overall meeting load, department distribution, and duration bands.</p>
               </div>
-              <div className="hero-tag">Coverage: 180 days · {loading ? 'Loading data...' : `${summary.meetingsCount.toLocaleString()} meetings`}</div>
+              <div className="hero-side">
+                {/* <div className="hero-tag">Range: {selectedRangeLabel} · {loading ? 'Loading data...' : `${summary.meetingsCount.toLocaleString()} meetings`}</div> */}
+                <DateRangeFilter
+                  startDate={startDateFilter}
+                  endDate={endDateFilter}
+                  minDate={minDateFilterValue}
+                  maxDate={maxDateFilterValue}
+                  onStartDateChange={handleStartDateChange}
+                  onEndDateChange={handleEndDateChange}
+                  disabled={loading || !availableDateRange}
+                />
+              </div>
             </header>
 
             <section className="metrics-grid">
@@ -746,6 +1302,7 @@ function App() {
                 granularity={lineGranularity}
                 onGranularityChange={setLineGranularity}
                 onExpand={() => setExpandedChart('line')}
+                infoHint={lineTrendPhrase}
               >
                 <ReactEChartsCore echarts={echarts} option={lineOption} style={{ height: 320 }} />
               </ChartCard>
@@ -753,10 +1310,9 @@ function App() {
               <ChartCard
                 eyebrow="Load"
                 title="Time spent by department"
-                value={`Treemap sized in ${getGranularityLabel(departmentGranularity).toLowerCase()}`}
-                granularity={departmentGranularity}
-                onGranularityChange={setDepartmentGranularity}
+                value="Each block shows total, average, and median duration"
                 onExpand={() => setExpandedChart('department')}
+                infoHint={departmentInsight}
               >
                 <ReactEChartsCore echarts={echarts} option={departmentOption} style={{ height: 320 }} />
               </ChartCard>
@@ -764,23 +1320,21 @@ function App() {
 
             <section className="charts-grid charts-grid-secondary">
               <ChartCard
-                eyebrow="Campaigns"
-                title="Time spent per campaign"
-                value={`Donut values shown in ${getGranularityLabel(campaignGranularity).toLowerCase()}`}
-                granularity={campaignGranularity}
-                onGranularityChange={setCampaignGranularity}
+                eyebrow="Companies"
+                title="Time spent per company"
+                value="Donut values shown in hours with average duration on hover"
                 onExpand={() => setExpandedChart('campaign')}
+                infoHint={companyDemandHint}
               >
-                <ReactEChartsCore echarts={echarts} option={campaignOption} style={{ height: 340 }} />
+                <ReactEChartsCore echarts={echarts} option={companyOption} style={{ height: 340 }} />
               </ChartCard>
 
               <ChartCard
                 eyebrow="Density"
                 title="Days with the most meetings"
-                value={`Heat map pivoted by ${getGranularityLabel(heatmapGranularity).toLowerCase()}`}
-                granularity={heatmapGranularity}
-                onGranularityChange={setHeatmapGranularity}
+                value="Heat map by hour of day only"
                 onExpand={() => setExpandedChart('heatmap')}
+                infoHint={heatmapConcentrationHint}
               >
                 <ReactEChartsCore echarts={echarts} option={heatmapOption} style={{ height: 340 }} />
               </ChartCard>
@@ -790,15 +1344,9 @@ function App() {
               <ChartCard
                 eyebrow="Distribution"
                 title="Meetings by duration range"
-                value={`Focused on ${durationOwnerFilter}`}
+                value="Stacked by hosted ownership percentages"
                 onExpand={() => setExpandedChart('duration')}
-                extraAction={
-                  <SegmentedControl
-                    value={durationOwnerFilter}
-                    options={OWNER_FILTERS}
-                    onChange={setDurationOwnerFilter}
-                  />
-                }
+                infoHint={meetingControlHint}
               >
                 <ReactEChartsCore echarts={echarts} option={durationOption} style={{ height: 340 }} />
               </ChartCard>
@@ -812,26 +1360,46 @@ function App() {
                 <h2>Who do I give my time to?</h2>
                 <p className="hero-copy">Relationship analysis by person, role, cadence, audience mix, and speaking behavior.</p>
               </div>
-              <div className="hero-tag">{loading ? 'Loading data...' : `${filteredPersonStats.length} people in view`}</div>
+              <div className="hero-side">
+                <div className="hero-tag">Range: {selectedRangeLabel} · {loading ? 'Loading data...' : `${filteredPersonStats.length} people in view`}</div>
+                <DateRangeFilter
+                  startDate={startDateFilter}
+                  endDate={endDateFilter}
+                  minDate={minDateFilterValue}
+                  maxDate={maxDateFilterValue}
+                  onStartDateChange={handleStartDateChange}
+                  onEndDateChange={handleEndDateChange}
+                  disabled={loading || !availableDateRange}
+                />
+              </div>
             </header>
 
-            <section className="metrics-grid metrics-grid-single">
-              <MetricCard
-                label="Best friend"
-                value={bestFriend ? bestFriend.person : 'No data'}
-                detail={bestFriend ? `${formatValue(bestFriend.totalMinutes, 'hours')} hours · ${bestFriend.meetings} meetings` : 'No matching person for current filter'}
-                accent="linear-gradient(135deg, #16324f, #c97342)"
-              />
+            <section className="metrics-grid">
+              {topThreeBestFriends.length ? topThreeBestFriends.map((friend, index) => (
+                <MetricCard
+                  key={`best-friend-${friend.person}`}
+                  label={`Best friend #${index + 1}`}
+                  value={friend.person}
+                  detail={`${formatValue(friend.totalMinutes, 'hours')} hours · ${friend.meetings} meetings`}
+                  accent="linear-gradient(135deg, #16324f, #c97342)"
+                />
+              )) : (
+                <MetricCard
+                  label="Best friends"
+                  value="No data"
+                  detail="No matching people for current filter"
+                  accent="linear-gradient(135deg, #16324f, #c97342)"
+                />
+              )}
             </section>
 
-            <section className="charts-grid charts-grid-secondary">
+            <section className="charts-grid charts-grid-tertiary">
               <ChartCard
                 eyebrow="People"
                 title="Total time spent per person"
-                value={`Filter: ${page2CompanyFilter} · Unit: ${getGranularityLabel(page2PeopleGranularity).toLowerCase()}`}
-                granularity={page2PeopleGranularity}
-                onGranularityChange={setPage2PeopleGranularity}
+                value={`Filter: ${page2CompanyFilter} · Top 30 · Unit: hours · Color: internal vs external`}
                 onExpand={() => setExpandedChart('p2PeopleTime')}
+                infoHint={decisionMakerHint}
                 extraAction={
                   <select
                     className="company-select"
