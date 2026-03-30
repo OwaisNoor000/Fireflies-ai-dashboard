@@ -480,6 +480,70 @@ button {
   gap: 6px;
 }
 
+.settings-live-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid rgba(22, 50, 79, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 10px 12px;
+}
+
+.settings-live-description {
+  margin: 6px 0 0;
+}
+
+.settings-switch {
+  position: relative;
+  display: inline-flex;
+  width: 50px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.settings-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.settings-slider {
+  position: absolute;
+  inset: 0;
+  background: rgba(22, 50, 79, 0.24);
+  border-radius: 999px;
+  transition: background 160ms ease;
+  cursor: pointer;
+}
+
+.settings-slider::before {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  left: 4px;
+  top: 4px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 160ms ease;
+  box-shadow: 0 2px 6px rgba(22, 50, 79, 0.24);
+}
+
+.settings-switch input:checked + .settings-slider {
+  background: var(--cool);
+}
+
+.settings-switch input:checked + .settings-slider::before {
+  transform: translateX(20px);
+}
+
+.settings-switch input:disabled + .settings-slider {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .settings-label {
   font-size: 0.9rem;
   font-weight: 600;
@@ -594,6 +658,34 @@ button {
   background: rgba(255, 252, 247, 0.96);
   border: 1px solid var(--line);
   box-shadow: 0 36px 80px rgba(22, 50, 79, 0.18);
+}
+
+.startup-progress-wrap {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.startup-progress-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(22, 50, 79, 0.14);
+  overflow: hidden;
+}
+
+.startup-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #4c8c77, #16324f);
+  border-radius: 999px;
+  transition: width 220ms ease;
+}
+
+.startup-progress-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .table-card {
@@ -778,5 +870,9 @@ button {
 
   .settings-inline-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-live-row {
+    align-items: flex-start;
   }
 }

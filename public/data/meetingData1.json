@@ -1,0 +1,70 @@
+[
+  {
+    "title": "X Recruiter Meeting",
+    "department": "",
+    "campaign": "",
+    "ownerCategory": "by-other-staff",
+    "ownerName": "",
+    "jacquesRole": "host",
+    "meetingSizeType": "1:1",
+    "meetingAudienceType": "external",
+    "startTime": "2026-03-27T07:30:00.000Z",
+    "scheduledDurationMinutes": 23,
+    "actualDurationMinutes": 23,
+    "myTalkTime": 36.98,
+    "participants": [
+      "Jonnathan Koch",
+      "paulmothapo.personal"
+    ],
+    "participantDetails": [
+      {
+        "name": "Jonnathan Koch",
+        "type": "external",
+        "company": "talentgenie.co.za",
+        "isExecutive": false,
+        "talkativeScore": 38.48,
+        "minutesConsumed": 8.84931666666669,
+        "inquisitiveScore": 13
+      },
+      {
+        "name": "paulmothapo.personal",
+        "type": "external",
+        "company": "gmail.com",
+        "isExecutive": false,
+        "talkativeScore": 0.0,
+        "minutesConsumed": 0,
+        "inquisitiveScore": 0
+      }
+    ],
+    "outcome": "undertime"
+  },
+  {
+    "title": "Owais Noor and Jose Luis Villalobos Mendiola",
+    "department": "",
+    "campaign": "",
+    "ownerCategory": "by-other-staff",
+    "ownerName": "",
+    "jacquesRole": "host",
+    "meetingSizeType": "1:M",
+    "meetingAudienceType": "external",
+    "startTime": "2026-03-12T14:00:00.000Z",
+    "scheduledDurationMinutes": 19.09000015258789,
+    "actualDurationMinutes": 19.09000015258789,
+    "myTalkTime": 27.89,
+    "participants": [
+      "Jose Luis Villalobos Mendiola"
+    ],
+    "participantDetails": [
+      {
+        "name": "Jose Luis Villalobos Mendiola",
+        "type": "external",
+        "company": "gmail.com",
+        "isExecutive": false,
+        "talkativeScore": 52.54,
+        "minutesConsumed": 10.030666666666669,
+        "inquisitiveScore": 8
+      }
+    ],
+    "outcome": "undertime"
+  }
+]

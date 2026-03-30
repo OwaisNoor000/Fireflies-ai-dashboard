@@ -57,6 +57,7 @@ const DEFAULT_BACKEND_CONFIG = {
   startup: false,
   'fireflies-api-key': '',
   'paid-plan': false,
+  'live-dashboard': false,
   'requests-used': 0,
   'company-domains': [],
 };
@@ -143,7 +144,9 @@ async function startBackendUpdate(baseUrl, startDate, endDate) {
     }
 
     const detailSuffix = errorDetail ? `: ${errorDetail}` : '';
-    throw new Error(`Failed to start update (${response.status})${detailSuffix}`);
+    const error = new Error(`Failed to start update (${response.status})${detailSuffix}`);
+    error.status = response.status;
+    throw error;
   }
 
   try {
@@ -165,6 +168,17 @@ async function fetchUpdateProgress(baseUrl) {
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function getUpdateProgressPercent(progress) {
+  const completed = Number(progress?.completedBatches) || 0;
+  const queued = Number(progress?.queuedBatches) || 0;
+
+  if (queued <= 0) {
+    return progress?.running ? 5 : 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round((completed / queued) * 100)));
 }
 
 function formatDateInputValue(date) {
@@ -638,12 +652,16 @@ function App() {
     myEmail: '',
     firefliesApiKey: '',
     paidPlan: false,
+    liveDashboard: false,
     startup: false,
     companyDomains: '',
   });
   const [showStartupForm, setShowStartupForm] = useState(false);
   const [isSavingStartup, setIsSavingStartup] = useState(false);
+  const [isRunningStartupUpdate, setIsRunningStartupUpdate] = useState(false);
+  const [startupUpdateProgress, setStartupUpdateProgress] = useState(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSavingLiveDashboard, setIsSavingLiveDashboard] = useState(false);
   const [isRunningUpdate, setIsRunningUpdate] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(null);
   const [updateStartDate, setUpdateStartDate] = useState('');
@@ -663,6 +681,7 @@ function App() {
       myEmail: nextConfig['my-email'] || '',
       firefliesApiKey: nextConfig['fireflies-api-key'] || '',
       paidPlan: Boolean(nextConfig['paid-plan']),
+      liveDashboard: Boolean(nextConfig['live-dashboard']),
       startup: Boolean(nextConfig.startup),
       companyDomains: toDomainsInput(nextConfig['company-domains']),
     });
@@ -759,11 +778,47 @@ function App() {
 
       setBackendConfig(nextConfig);
       syncFormsFromConfig(nextConfig);
-      setShowStartupForm(false);
-      setSettingsMessage('Startup configuration saved.');
+
+      const endDate = formatDateInputValue(new Date());
+      const startDateObject = new Date();
+      startDateObject.setMonth(startDateObject.getMonth() - 3);
+      const startDate = formatDateInputValue(startDateObject);
+
+      setSettingsMessage('Startup configuration saved. Running initial 3-month import...');
+      setStartupUpdateProgress(null);
+      setIsRunningStartupUpdate(true);
+
+      try {
+        await startBackendUpdate(APP_CONFIG.backendUrl, startDate, endDate);
+      } catch (updateStartError) {
+        if (updateStartError?.status !== 409) {
+          throw updateStartError;
+        }
+      }
+
+      let latestProgress = null;
+      do {
+        latestProgress = await fetchUpdateProgress(APP_CONFIG.backendUrl);
+        setStartupUpdateProgress(latestProgress);
+
+        if (latestProgress?.running) {
+          await sleep(1500);
+        }
+      } while (latestProgress?.running);
+
+      const refreshedData = await fetchMeetingDataFromBackend(APP_CONFIG.backendUrl);
+      setMeetingData(refreshedData);
+
+      if (latestProgress?.error) {
+        setSettingsMessage(`Startup import finished with error: ${latestProgress.error}`);
+      } else {
+        setSettingsMessage('Startup completed. Data imported for the past 3 months.');
+        setShowStartupForm(false);
+      }
     } catch (error) {
       setSettingsMessage(error instanceof Error ? error.message : 'Failed to save startup configuration.');
     } finally {
+      setIsRunningStartupUpdate(false);
       setIsSavingStartup(false);
     }
   }
@@ -783,6 +838,7 @@ function App() {
       'my-email': settingsForm.myEmail.trim(),
       'fireflies-api-key': settingsForm.firefliesApiKey.trim(),
       'paid-plan': settingsForm.paidPlan,
+      'live-dashboard': settingsForm.liveDashboard,
       'company-domains': parseDomainsInput(settingsForm.companyDomains),
       startup: settingsForm.startup,
     };
@@ -802,6 +858,37 @@ function App() {
       setSettingsMessage(error instanceof Error ? error.message : 'Failed to update settings.');
     } finally {
       setIsSavingSettings(false);
+    }
+  }
+
+  async function handleLiveDashboardToggle(nextValue) {
+    const previousValue = settingsForm.liveDashboard;
+    setSettingsForm((current) => ({ ...current, liveDashboard: nextValue }));
+
+    if (APP_CONFIG.demo || !APP_CONFIG.backendUrl) {
+      setSettingsMessage('Demo mode is enabled. Backend settings are not editable.');
+      return;
+    }
+
+    setIsSavingLiveDashboard(true);
+    setSettingsMessage('Updating live dashboard mode...');
+
+    try {
+      const payload = { 'live-dashboard': nextValue };
+      const serverConfig = await patchBackendConfig(APP_CONFIG.backendUrl, payload);
+      const nextConfig = {
+        ...backendConfig,
+        ...payload,
+        ...(serverConfig && typeof serverConfig === 'object' ? serverConfig : {}),
+      };
+
+      setBackendConfig(nextConfig);
+      setSettingsMessage(`Live dashboard ${nextValue ? 'enabled' : 'disabled'}.`);
+    } catch (error) {
+      setSettingsForm((current) => ({ ...current, liveDashboard: previousValue }));
+      setSettingsMessage(error instanceof Error ? error.message : 'Failed to update live dashboard mode.');
+    } finally {
+      setIsSavingLiveDashboard(false);
     }
   }
 
@@ -2049,6 +2136,26 @@ function App() {
                 {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
 
                 <form className="settings-form" onSubmit={handleSettingsSubmit}>
+                  <div className="settings-live-row">
+                    <div>
+                      <span className="settings-label">Live dashboard</span>
+                      <p className="settings-description settings-live-description">
+                        {settingsForm.paidPlan
+                          ? 'Enabled: backend cron job runs every 30 minutes on paid plan.'
+                          : 'Enabled: backend cron job runs every 2 hours on free plan.'}
+                      </p>
+                    </div>
+                    <label className="settings-switch" aria-label="Toggle live dashboard cron updates">
+                      <input
+                        type="checkbox"
+                        checked={settingsForm.liveDashboard}
+                        onChange={(event) => handleLiveDashboardToggle(event.target.checked)}
+                        disabled={APP_CONFIG.demo || isSavingSettings || isSavingLiveDashboard}
+                      />
+                      <span className="settings-slider" />
+                    </label>
+                  </div>
+
                   <label className="settings-field">
                     <span className="settings-label">Meeting email</span>
                     <span className="settings-description">The email identity used to classify your meetings.</span>
@@ -2191,7 +2298,7 @@ function App() {
                   type="text"
                   value={startupForm.firefliesApiKey}
                   onChange={(event) => setStartupForm((current) => ({ ...current, firefliesApiKey: event.target.value }))}
-                  disabled={isSavingStartup}
+                  disabled={isSavingStartup || isRunningStartupUpdate}
                   required
                 />
               </label>
@@ -2202,7 +2309,7 @@ function App() {
                 <select
                   value={startupForm.paidPlan ? 'paid' : 'free'}
                   onChange={(event) => setStartupForm((current) => ({ ...current, paidPlan: event.target.value === 'paid' }))}
-                  disabled={isSavingStartup}
+                  disabled={isSavingStartup || isRunningStartupUpdate}
                 >
                   <option value="free">Free</option>
                   <option value="paid">Paid</option>
@@ -2216,7 +2323,7 @@ function App() {
                   type="text"
                   value={startupForm.companyDomains}
                   onChange={(event) => setStartupForm((current) => ({ ...current, companyDomains: event.target.value }))}
-                  disabled={isSavingStartup}
+                  disabled={isSavingStartup || isRunningStartupUpdate}
                   required
                 />
               </label>
@@ -2228,15 +2335,36 @@ function App() {
                   type="email"
                   value={startupForm.myEmail}
                   onChange={(event) => setStartupForm((current) => ({ ...current, myEmail: event.target.value }))}
-                  disabled={isSavingStartup}
+                  disabled={isSavingStartup || isRunningStartupUpdate}
                   required
                 />
               </label>
 
+              {isRunningStartupUpdate ? (
+                <div className="startup-progress-wrap">
+                  <p className="settings-description">
+                    {startupUpdateProgress?.message || 'Preparing background import job...'}
+                  </p>
+                  <div className="startup-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={getUpdateProgressPercent(startupUpdateProgress)}>
+                    <span
+                      className="startup-progress-fill"
+                      style={{ width: `${getUpdateProgressPercent(startupUpdateProgress)}%` }}
+                    />
+                  </div>
+                  <p className="startup-progress-meta">
+                    {getUpdateProgressPercent(startupUpdateProgress)}% · Batches {Number(startupUpdateProgress?.completedBatches) || 0}/{Number(startupUpdateProgress?.queuedBatches) || 0}
+                  </p>
+                </div>
+              ) : null}
+
               {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
 
-              <button type="submit" className="settings-save" disabled={isSavingStartup}>
-                {isSavingStartup ? 'Saving startup config...' : 'Save and continue'}
+              <button type="submit" className="settings-save" disabled={isSavingStartup || isRunningStartupUpdate}>
+                {isSavingStartup
+                  ? 'Saving startup config...'
+                  : isRunningStartupUpdate
+                    ? 'Importing data...'
+                    : 'Save and continue'}
               </button>
             </form>
           </section>
