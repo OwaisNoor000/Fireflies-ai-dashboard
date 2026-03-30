@@ -2397,11 +2397,13 @@ function App() {
                 <CloseIcon />
               </button>
             </div>
-            <ReactEChartsCore
-              echarts={echarts}
-              option={activeExpandedChart.option}
-              style={{ height: 'min(72vh, 760px)', width: '100%' }}
-            />
+            <div className="chart-modal-chart">
+              <ReactEChartsCore
+                echarts={echarts}
+                option={activeExpandedChart.option}
+                style={{ height: '100%', width: '100%' }}
+              />
+            </div>
           </section>
         </div>
       ) : null}
