@@ -29,6 +29,7 @@ import {
   getSummaryMetrics,
   getTopPeopleByScore,
 } from './dashboardData';
+import appConfig from '../config.json';
 
 echarts.use([
   BarChart,
@@ -47,6 +48,124 @@ echarts.use([
 ]);
 
 const GRANULARITIES = ['months', 'weeks', 'days', 'hours'];
+const APP_CONFIG = {
+  demo: Boolean(appConfig?.demo),
+  backendUrl: typeof appConfig?.backendUrl === 'string' ? appConfig.backendUrl.replace(/\/$/, '') : '',
+};
+const DEFAULT_BACKEND_CONFIG = {
+  'my-email': '',
+  startup: false,
+  'fireflies-api-key': '',
+  'paid-plan': false,
+  'requests-used': 0,
+  'company-domains': [],
+};
+
+function toDomainsInput(domains) {
+  return Array.isArray(domains) ? domains.join(', ') : '';
+}
+
+function parseDomainsInput(value) {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+async function fetchBackendConfig(baseUrl) {
+  const response = await fetch(`${baseUrl}/config`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch backend config (${response.status})`);
+  }
+
+  const payload = await response.json();
+  return {
+    ...DEFAULT_BACKEND_CONFIG,
+    ...(payload && typeof payload === 'object' ? payload : {}),
+  };
+}
+
+async function patchBackendConfig(baseUrl, payload) {
+  const response = await fetch(`${baseUrl}/config`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update backend config (${response.status})`);
+  }
+
+  try {
+    const data = await response.json();
+    return data && typeof data === 'object' ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchMeetingDataFromBackend(baseUrl) {
+  const response = await fetch(`${baseUrl}/database`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch database records (${response.status})`);
+  }
+
+  const payload = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error('Backend /database did not return an array.');
+  }
+
+  return payload;
+}
+
+async function startBackendUpdate(baseUrl, startDate, endDate) {
+  const response = await fetch(`${baseUrl}/update`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ startDate, endDate }),
+  });
+
+  if (!response.ok) {
+    let errorDetail = '';
+    try {
+      const errorPayload = await response.json();
+      errorDetail = errorPayload?.detail || errorPayload?.message || '';
+    } catch {
+      errorDetail = '';
+    }
+
+    const detailSuffix = errorDetail ? `: ${errorDetail}` : '';
+    throw new Error(`Failed to start update (${response.status})${detailSuffix}`);
+  }
+
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchUpdateProgress(baseUrl) {
+  const response = await fetch(`${baseUrl}/progress`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch update progress (${response.status})`);
+  }
+
+  const payload = await response.json();
+  return payload && typeof payload === 'object' ? payload : {};
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 function formatDateInputValue(date) {
   const year = date.getFullYear();
@@ -332,10 +451,20 @@ function AlternativesIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8.1a3.9 3.9 0 1 0 0 7.8 3.9 3.9 0 0 0 0-7.8z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M19.2 12a7.4 7.4 0 0 0-.1-1.1l1.9-1.5-1.8-3.1-2.4 1a7.8 7.8 0 0 0-1.9-1.1l-.4-2.6h-3.6l-.4 2.6a7.8 7.8 0 0 0-1.9 1.1l-2.4-1-1.8 3.1 1.9 1.5a7.4 7.4 0 0 0-.1 1.1c0 .4 0 .7.1 1.1l-1.9 1.5 1.8 3.1 2.4-1c.6.5 1.2.8 1.9 1.1l.4 2.6h3.6l.4-2.6c.7-.3 1.3-.6 1.9-1.1l2.4 1 1.8-3.1-1.9-1.5c.1-.4.1-.7.1-1.1z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 const NAV_ITEMS = [
   { id: 'page1', label: 'Page 1 · Meetings', shortLabel: 'Meetings', Icon: MeetingsIcon },
   { id: 'page2', label: 'Page 2 · People', shortLabel: 'People', Icon: PeopleIcon },
   { id: 'page3', label: 'Page 3 · Alternatives', shortLabel: 'Alternatives', Icon: AlternativesIcon },
+  { id: 'page4', label: 'Settings', shortLabel: 'Settings', Icon: SettingsIcon },
 ];
 
 function MetricCard({ label, value, accent, detail }) {
@@ -498,31 +627,228 @@ function App() {
   const [page2CompanyFilter, setPage2CompanyFilter] = useState('All companies');
   const [page2RoleGranularity, setPage2RoleGranularity] = useState('hours');
   const [page2TrendGranularity, setPage2TrendGranularity] = useState('weeks');
+  const [backendConfig, setBackendConfig] = useState(DEFAULT_BACKEND_CONFIG);
+  const [startupForm, setStartupForm] = useState({
+    myEmail: '',
+    firefliesApiKey: '',
+    paidPlan: false,
+    companyDomains: '',
+  });
+  const [settingsForm, setSettingsForm] = useState({
+    myEmail: '',
+    firefliesApiKey: '',
+    paidPlan: false,
+    startup: false,
+    companyDomains: '',
+  });
+  const [showStartupForm, setShowStartupForm] = useState(false);
+  const [isSavingStartup, setIsSavingStartup] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isRunningUpdate, setIsRunningUpdate] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState(null);
+  const [updateStartDate, setUpdateStartDate] = useState('');
+  const [updateEndDate, setUpdateEndDate] = useState('');
+  const [settingsMessage, setSettingsMessage] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  function syncFormsFromConfig(nextConfig) {
+    setStartupForm({
+      myEmail: nextConfig['my-email'] || '',
+      firefliesApiKey: nextConfig['fireflies-api-key'] || '',
+      paidPlan: Boolean(nextConfig['paid-plan']),
+      companyDomains: toDomainsInput(nextConfig['company-domains']),
+    });
+
+    setSettingsForm({
+      myEmail: nextConfig['my-email'] || '',
+      firefliesApiKey: nextConfig['fireflies-api-key'] || '',
+      paidPlan: Boolean(nextConfig['paid-plan']),
+      startup: Boolean(nextConfig.startup),
+      companyDomains: toDomainsInput(nextConfig['company-domains']),
+    });
+  }
 
   useEffect(() => {
     let active = true;
 
     async function loadMeetingData() {
-      const response = await fetch(`${import.meta.env.BASE_URL}data/meetingData.json`);
-      const payload = await response.json();
+      setLoading(true);
+      setLoadError('');
 
-      if (active) {
-        setMeetingData(payload);
-        setLoading(false);
+      try {
+        if (APP_CONFIG.demo) {
+          const response = await fetch(`${import.meta.env.BASE_URL}data/meetingData.json`);
+          const payload = await response.json();
+
+          if (active) {
+            setMeetingData(Array.isArray(payload) ? payload : []);
+            setBackendConfig(DEFAULT_BACKEND_CONFIG);
+            syncFormsFromConfig(DEFAULT_BACKEND_CONFIG);
+            setShowStartupForm(false);
+            setLoading(false);
+          }
+          return;
+        }
+
+        if (!APP_CONFIG.backendUrl) {
+          throw new Error('Missing backendUrl in config.json while demo mode is disabled.');
+        }
+
+        const remoteConfig = await fetchBackendConfig(APP_CONFIG.backendUrl);
+        const remoteMeetingData = await fetchMeetingDataFromBackend(APP_CONFIG.backendUrl);
+
+        if (active) {
+          setBackendConfig(remoteConfig);
+          syncFormsFromConfig(remoteConfig);
+          setShowStartupForm(Boolean(remoteConfig.startup));
+          setMeetingData(remoteMeetingData);
+          const sortedDates = remoteMeetingData
+            .map((record) => new Date(record.startTime))
+            .filter((date) => Number.isFinite(date.getTime()))
+            .sort((left, right) => left - right);
+
+          if (sortedDates.length) {
+            setUpdateStartDate((current) => current || formatDateInputValue(sortedDates[0]));
+            setUpdateEndDate((current) => current || formatDateInputValue(sortedDates[sortedDates.length - 1]));
+          }
+
+          setLoading(false);
+        }
+      } catch (error) {
+        if (active) {
+          setMeetingData([]);
+          setLoading(false);
+          setLoadError(error instanceof Error ? error.message : 'Unable to load data.');
+        }
       }
     }
 
-    loadMeetingData().catch(() => {
-      if (active) {
-        setMeetingData([]);
-        setLoading(false);
-      }
-    });
+    loadMeetingData();
 
     return () => {
       active = false;
     };
   }, []);
+
+  async function handleStartupSubmit(event) {
+    event.preventDefault();
+
+    if (APP_CONFIG.demo || !APP_CONFIG.backendUrl) {
+      setShowStartupForm(false);
+      return;
+    }
+
+    setIsSavingStartup(true);
+    setSettingsMessage('');
+
+    const payload = {
+      'my-email': startupForm.myEmail.trim(),
+      'fireflies-api-key': startupForm.firefliesApiKey.trim(),
+      'paid-plan': startupForm.paidPlan,
+      'company-domains': parseDomainsInput(startupForm.companyDomains),
+      startup: false,
+    };
+
+    try {
+      const serverConfig = await patchBackendConfig(APP_CONFIG.backendUrl, payload);
+      const nextConfig = {
+        ...backendConfig,
+        ...payload,
+        ...(serverConfig && typeof serverConfig === 'object' ? serverConfig : {}),
+      };
+
+      setBackendConfig(nextConfig);
+      syncFormsFromConfig(nextConfig);
+      setShowStartupForm(false);
+      setSettingsMessage('Startup configuration saved.');
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : 'Failed to save startup configuration.');
+    } finally {
+      setIsSavingStartup(false);
+    }
+  }
+
+  async function handleSettingsSubmit(event) {
+    event.preventDefault();
+
+    if (APP_CONFIG.demo || !APP_CONFIG.backendUrl) {
+      setSettingsMessage('Demo mode is enabled. Backend settings are not editable.');
+      return;
+    }
+
+    setIsSavingSettings(true);
+    setSettingsMessage('');
+
+    const payload = {
+      'my-email': settingsForm.myEmail.trim(),
+      'fireflies-api-key': settingsForm.firefliesApiKey.trim(),
+      'paid-plan': settingsForm.paidPlan,
+      'company-domains': parseDomainsInput(settingsForm.companyDomains),
+      startup: settingsForm.startup,
+    };
+
+    try {
+      const serverConfig = await patchBackendConfig(APP_CONFIG.backendUrl, payload);
+      const nextConfig = {
+        ...backendConfig,
+        ...payload,
+        ...(serverConfig && typeof serverConfig === 'object' ? serverConfig : {}),
+      };
+
+      setBackendConfig(nextConfig);
+      syncFormsFromConfig(nextConfig);
+      setSettingsMessage('Settings updated successfully.');
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : 'Failed to update settings.');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  async function handleRunBackendUpdate(event) {
+    event.preventDefault();
+
+    if (APP_CONFIG.demo || !APP_CONFIG.backendUrl) {
+      setSettingsMessage('Demo mode is enabled. Backend update is unavailable.');
+      return;
+    }
+
+    if (!updateStartDate || !updateEndDate) {
+      setSettingsMessage('Please choose both start and end dates before running update.');
+      return;
+    }
+
+    setIsRunningUpdate(true);
+    setSettingsMessage('Starting backend update...');
+    setUpdateProgress(null);
+
+    try {
+      await startBackendUpdate(APP_CONFIG.backendUrl, updateStartDate, updateEndDate);
+
+      let latestProgress = null;
+      do {
+        latestProgress = await fetchUpdateProgress(APP_CONFIG.backendUrl);
+        setUpdateProgress(latestProgress);
+
+        if (latestProgress?.running) {
+          await sleep(1500);
+        }
+      } while (latestProgress?.running);
+
+      const refreshedData = await fetchMeetingDataFromBackend(APP_CONFIG.backendUrl);
+      setMeetingData(refreshedData);
+
+      if (latestProgress?.error) {
+        setSettingsMessage(`Update finished with error: ${latestProgress.error}`);
+      } else {
+        setSettingsMessage('Update completed and data refreshed from /database.');
+      }
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : 'Failed to run backend update.');
+    } finally {
+      setIsRunningUpdate(false);
+    }
+  }
 
   useEffect(() => {
     if (!expandedChart) {
@@ -1650,7 +1976,7 @@ function App() {
               </ChartCard>
             </section>
           </>
-        ) : (
+        ) : activePage === 'page3' ? (
           <>
             <header className="hero-card">
               <div>
@@ -1692,8 +2018,230 @@ function App() {
               </ChartCard>
             </section>
           </>
+        ) : (
+          <>
+            <header className="hero-card">
+              <div>
+                <p className="hero-kicker">Settings</p>
+                <h2>Connection and account configuration</h2>
+                <p className="hero-copy">Manage backend credentials, plan mode, company domains, and startup behavior.</p>
+              </div>
+              <div className="hero-side">
+                <div className="hero-tag">Mode: {APP_CONFIG.demo ? 'Demo' : 'Backend'}{APP_CONFIG.demo ? '' : ` · ${APP_CONFIG.backendUrl}`}</div>
+              </div>
+            </header>
+
+            <section className="charts-grid charts-grid-tertiary">
+              <section className="chart-card settings-card">
+                <div className="chart-header">
+                  <div>
+                    <p className="chart-eyebrow">Backend config</p>
+                    <h3>Editable values from /config</h3>
+                    <p className="chart-value">
+                      {APP_CONFIG.demo
+                        ? 'Demo mode active: values below are local placeholders and cannot be saved to backend.'
+                        : 'Update values and save to PATCH /config.'}
+                    </p>
+                  </div>
+                </div>
+
+                {loadError ? <p className="settings-message error">{loadError}</p> : null}
+                {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
+
+                <form className="settings-form" onSubmit={handleSettingsSubmit}>
+                  <label className="settings-field">
+                    <span className="settings-label">Meeting email</span>
+                    <span className="settings-description">The email identity used to classify your meetings.</span>
+                    <input
+                      type="email"
+                      value={settingsForm.myEmail}
+                      onChange={(event) => setSettingsForm((current) => ({ ...current, myEmail: event.target.value }))}
+                      disabled={APP_CONFIG.demo || isSavingSettings}
+                    />
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-label">Fireflies API key</span>
+                    <span className="settings-description">API key used for meeting transcript ingestion and sync.</span>
+                    <input
+                      type="text"
+                      value={settingsForm.firefliesApiKey}
+                      onChange={(event) => setSettingsForm((current) => ({ ...current, firefliesApiKey: event.target.value }))}
+                      disabled={APP_CONFIG.demo || isSavingSettings}
+                    />
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-label">Plan type</span>
+                    <span className="settings-description">Whether your Fireflies plan is paid or free.</span>
+                    <select
+                      value={settingsForm.paidPlan ? 'paid' : 'free'}
+                      onChange={(event) => setSettingsForm((current) => ({ ...current, paidPlan: event.target.value === 'paid' }))}
+                      disabled={APP_CONFIG.demo || isSavingSettings}
+                    >
+                      <option value="free">Free</option>
+                      <option value="paid">Paid</option>
+                    </select>
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-label">Company domains</span>
+                    <span className="settings-description">Comma-separated domains treated as internal company addresses.</span>
+                    <input
+                      type="text"
+                      value={settingsForm.companyDomains}
+                      onChange={(event) => setSettingsForm((current) => ({ ...current, companyDomains: event.target.value }))}
+                      placeholder="pontifex.co, denteel.com"
+                      disabled={APP_CONFIG.demo || isSavingSettings}
+                    />
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-label">Startup prompt enabled</span>
+                    <span className="settings-description">When true, onboarding runs on next load and asks for required setup details.</span>
+                    <select
+                      value={settingsForm.startup ? 'true' : 'false'}
+                      onChange={(event) => setSettingsForm((current) => ({ ...current, startup: event.target.value === 'true' }))}
+                      disabled={APP_CONFIG.demo || isSavingSettings}
+                    >
+                      <option value="false">False</option>
+                      <option value="true">True</option>
+                    </select>
+                  </label>
+
+                  <div className="settings-field">
+                    <span className="settings-label">Requests used</span>
+                    <span className="settings-description">Read-only counter returned by backend /config.</span>
+                    <p className="settings-readonly-value">{Number(backendConfig['requests-used']) || 0}</p>
+                  </div>
+
+                  <button type="submit" className="settings-save" disabled={APP_CONFIG.demo || isSavingSettings}>
+                    {isSavingSettings ? 'Saving...' : 'Save settings'}
+                  </button>
+                </form>
+
+                <hr className="settings-divider" />
+
+                <form className="settings-form" onSubmit={handleRunBackendUpdate}>
+                  <p className="chart-value">Run backend transcript update for a date range (POST /update), then auto-refresh from GET /database.</p>
+
+                  <div className="settings-inline-grid">
+                    <label className="settings-field">
+                      <span className="settings-label">Update start date</span>
+                      <span className="settings-description">Earliest meeting date to fetch and map.</span>
+                      <input
+                        type="date"
+                        value={updateStartDate}
+                        onChange={(event) => setUpdateStartDate(event.target.value)}
+                        disabled={APP_CONFIG.demo || isRunningUpdate}
+                        required
+                      />
+                    </label>
+
+                    <label className="settings-field">
+                      <span className="settings-label">Update end date</span>
+                      <span className="settings-description">Latest meeting date to fetch and map.</span>
+                      <input
+                        type="date"
+                        value={updateEndDate}
+                        onChange={(event) => setUpdateEndDate(event.target.value)}
+                        disabled={APP_CONFIG.demo || isRunningUpdate}
+                        required
+                      />
+                    </label>
+                  </div>
+
+                  <button type="submit" className="settings-save" disabled={APP_CONFIG.demo || isRunningUpdate}>
+                    {isRunningUpdate ? 'Updating...' : 'Run update'}
+                  </button>
+
+                  {updateProgress ? (
+                    <div className="settings-progress">
+                      <p><strong>Status:</strong> {updateProgress.running ? 'Running' : 'Idle'}</p>
+                      <p><strong>Message:</strong> {updateProgress.message || 'No message'}</p>
+                      <p><strong>Window:</strong> {updateProgress.startDate || 'n/a'} to {updateProgress.endDate || 'n/a'}</p>
+                      <p><strong>Batches:</strong> {updateProgress.completedBatches || 0} / {updateProgress.queuedBatches || 0}</p>
+                      <p><strong>Mapped:</strong> {updateProgress.mappedTranscripts || 0} | <strong>Appended:</strong> {updateProgress.appendedTranscripts || 0} | <strong>Skipped:</strong> {updateProgress.skippedDuplicates || 0}</p>
+                      {updateProgress.error ? <p><strong>Error:</strong> {String(updateProgress.error)}</p> : null}
+                    </div>
+                  ) : null}
+                </form>
+              </section>
+            </section>
+          </>
         )}
       </main>
+
+      {showStartupForm && !APP_CONFIG.demo ? (
+        <div className="startup-overlay" role="presentation">
+          <section className="startup-modal" role="dialog" aria-modal="true" aria-label="Startup configuration">
+            <div className="chart-modal-header">
+              <div>
+                <p className="chart-eyebrow">Startup setup</p>
+                <h3>Complete your backend configuration</h3>
+                <p className="chart-value">Please add required details before using non-demo mode.</p>
+              </div>
+            </div>
+
+            <form className="settings-form" onSubmit={handleStartupSubmit}>
+              <label className="settings-field">
+                <span className="settings-label">Fireflies API key</span>
+                <span className="settings-description">Used to fetch meeting transcripts and metadata.</span>
+                <input
+                  type="text"
+                  value={startupForm.firefliesApiKey}
+                  onChange={(event) => setStartupForm((current) => ({ ...current, firefliesApiKey: event.target.value }))}
+                  disabled={isSavingStartup}
+                  required
+                />
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-label">Plan type</span>
+                <span className="settings-description">Select whether your current plan is free or paid.</span>
+                <select
+                  value={startupForm.paidPlan ? 'paid' : 'free'}
+                  onChange={(event) => setStartupForm((current) => ({ ...current, paidPlan: event.target.value === 'paid' }))}
+                  disabled={isSavingStartup}
+                >
+                  <option value="free">Free</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-label">Company email domains</span>
+                <span className="settings-description">Comma-separated domains like pontifex.co, denteel.com.</span>
+                <input
+                  type="text"
+                  value={startupForm.companyDomains}
+                  onChange={(event) => setStartupForm((current) => ({ ...current, companyDomains: event.target.value }))}
+                  disabled={isSavingStartup}
+                  required
+                />
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-label">Meetings email</span>
+                <span className="settings-description">Your main meeting email identity.</span>
+                <input
+                  type="email"
+                  value={startupForm.myEmail}
+                  onChange={(event) => setStartupForm((current) => ({ ...current, myEmail: event.target.value }))}
+                  disabled={isSavingStartup}
+                  required
+                />
+              </label>
+
+              {settingsMessage ? <p className="settings-message">{settingsMessage}</p> : null}
+
+              <button type="submit" className="settings-save" disabled={isSavingStartup}>
+                {isSavingStartup ? 'Saving startup config...' : 'Save and continue'}
+              </button>
+            </form>
+          </section>
+        </div>
+      ) : null}
 
       {activeExpandedChart ? (
         <div className="chart-modal-overlay" role="presentation" onClick={() => setExpandedChart(null)}>

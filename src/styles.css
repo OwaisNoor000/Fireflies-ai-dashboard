@@ -466,6 +466,136 @@ button {
   font-size: clamp(1.5rem, 2vw, 2rem);
 }
 
+.settings-card {
+  padding-bottom: 28px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.settings-description {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.settings-field input,
+.settings-field select {
+  border: 1px solid rgba(22, 50, 79, 0.14);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.settings-readonly-value {
+  margin: 0;
+  border: 1px solid rgba(22, 50, 79, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.settings-divider {
+  border: 0;
+  height: 1px;
+  background: rgba(22, 50, 79, 0.12);
+  margin: 18px 0;
+}
+
+.settings-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-progress {
+  border: 1px solid rgba(22, 50, 79, 0.12);
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  padding: 12px;
+  color: var(--ink);
+}
+
+.settings-progress p {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+}
+
+.settings-progress p:last-child {
+  margin-bottom: 0;
+}
+
+.settings-save {
+  width: fit-content;
+  border: 1px solid rgba(22, 50, 79, 0.08);
+  background: var(--ink);
+  color: #f8f6f1;
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.settings-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-message {
+  margin: 0 0 10px;
+  color: #2b5f4c;
+  background: rgba(76, 140, 119, 0.14);
+  border: 1px solid rgba(76, 140, 119, 0.3);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+}
+
+.settings-message.error {
+  color: #8b3d35;
+  background: rgba(201, 115, 66, 0.16);
+  border-color: rgba(201, 115, 66, 0.35);
+}
+
+.startup-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(22, 50, 79, 0.44);
+  backdrop-filter: blur(8px);
+  z-index: 70;
+}
+
+.startup-modal {
+  width: min(760px, calc(100vw - 56px));
+  max-height: min(90vh, 920px);
+  overflow-y: auto;
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 252, 247, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: 0 36px 80px rgba(22, 50, 79, 0.18);
+}
+
 .table-card {
   overflow: hidden;
 }
@@ -633,7 +763,20 @@ button {
     padding: 18px;
   }
 
+  .startup-overlay {
+    padding: 14px;
+  }
+
+  .startup-modal {
+    width: calc(100vw - 28px);
+    padding: 18px;
+  }
+
   .chart-modal-header {
     flex-direction: column;
+  }
+
+  .settings-inline-grid {
+    grid-template-columns: 1fr;
   }
 }
