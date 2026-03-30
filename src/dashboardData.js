@@ -637,13 +637,11 @@ export function getMeetingNeedAnalysis(records) {
 
   const durationVsTalkShareScatter = validRecords.map((record) => {
     const nonExecutiveParticipants = getParticipantsExcludingExecutive(record);
-    const averageCounterpartTalkative = nonExecutiveParticipants.length
-      ? nonExecutiveParticipants.reduce((sum, participant) => sum + getParticipantScore(participant, 'talkativeScore'), 0)
-        / nonExecutiveParticipants.length
-      : 50;
+    const myTalkTime = Number(record.myTalkTime);
+    const normalizedMyTalkTime = Number.isFinite(myTalkTime) ? myTalkTime : 50;
 
     return {
-      value: [record.actualDurationMinutes, Math.max(0, Math.min(100, 100 - averageCounterpartTalkative))],
+      value: [record.actualDurationMinutes, Math.max(0, Math.min(100, normalizedMyTalkTime))],
       id: record.id,
       title: record.title,
       participantSummary: nonExecutiveParticipants.length

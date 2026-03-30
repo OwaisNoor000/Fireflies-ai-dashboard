@@ -1346,7 +1346,7 @@ function App() {
     p3DurationVsTalkShare: {
       eyebrow: 'Voice balance',
       title: 'Meeting duration vs my talk time %',
-      value: 'Jacques speaking share estimated from participant talkative profiles',
+      value: 'Jacques speaking share from meetingData myTalkTime field',
       option: durationVsTalkShareOption,
     },
     p3Normal: {
@@ -1676,7 +1676,7 @@ function App() {
               <ChartCard
                 eyebrow="Voice balance"
                 title="Meeting duration vs my talk time %"
-                value="Jacques speaking share estimated from participant talkative profiles"
+                value="Jacques speaking share from meetingData myTalkTime field"
                 onExpand={() => setExpandedChart('p3DurationVsTalkShare')}
               >
                 <ReactEChartsCore echarts={echarts} option={durationVsTalkShareOption} style={{ height: 360 }} />

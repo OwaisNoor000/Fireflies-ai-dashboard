@@ -11,14 +11,14 @@
     "startTime": "2026-03-27T07:30:00.000Z",
     "scheduledDurationMinutes": 23,
     "actualDurationMinutes": 23,
+    "myTalkTime": 36.98,
     "participants": [
       "Jonnathan Koch",
-      "Owais Noor"
+      "paulmothapo.personal"
     ],
     "participantDetails": [
       {
         "name": "Jonnathan Koch",
-        "me": false,
         "type": "external",
         "company": "talentgenie.co.za",
         "isExecutive": false,
@@ -27,18 +27,7 @@
         "inquisitiveScore": 13
       },
       {
-        "name": "Owais Noor",
-        "me": true,
-        "type": "external",
-        "company": "gmail.com",
-        "isExecutive": false,
-        "talkativeScore": 36.98,
-        "minutesConsumed": 8.505849999999997,
-        "inquisitiveScore": 13
-      },
-      {
         "name": "paulmothapo.personal",
-        "me": false,
         "type": "external",
         "company": "gmail.com",
         "isExecutive": false,
@@ -56,29 +45,18 @@
     "ownerCategory": "by-other-staff",
     "ownerName": "",
     "jacquesRole": "host",
-    "meetingSizeType": "1:1",
+    "meetingSizeType": "1:M",
     "meetingAudienceType": "external",
     "startTime": "2026-03-12T14:00:00.000Z",
     "scheduledDurationMinutes": 19.09000015258789,
     "actualDurationMinutes": 19.09000015258789,
+    "myTalkTime": 27.89,
     "participants": [
-      "Jose Luis Villalobos Mendiola",
-      "Owais Noor"
+      "Jose Luis Villalobos Mendiola"
     ],
     "participantDetails": [
       {
-        "name": "Owais Noor",
-        "me": true,
-        "type": "external",
-        "company": "gmail.com",
-        "isExecutive": false,
-        "talkativeScore": 27.89,
-        "minutesConsumed": 5.323533333333345,
-        "inquisitiveScore": 10
-      },
-      {
         "name": "Jose Luis Villalobos Mendiola",
-        "me": false,
         "type": "external",
         "company": "gmail.com",
         "isExecutive": false,
